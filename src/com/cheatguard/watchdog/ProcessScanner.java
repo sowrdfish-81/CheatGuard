@@ -10,26 +10,27 @@ public class ProcessScanner {
 
     public List<ProcessInfo> scanProcesses() {
 
-        // All scanned processes will be stored here
+        // Store all detected processes here
         List<ProcessInfo> processes = new ArrayList<>();
 
-        // Get only the processes that have a visible window
-        // and format the output so it is easier to parse in Java
+        // Get processes that currently have a visible window
+        // Format: PID@@@ProcessName@@@WindowTitle
         String command =
                 "Get-Process | " +
                 "Where-Object { $_.MainWindowTitle -ne '' } | " +
-                "Select-Object Id, ProcessName, MainWindowTitle | " +
                 "ForEach-Object { " +
                 "\"$($_.Id)@@@$($_.ProcessName)@@@$($_.MainWindowTitle)\" " +
                 "}";
 
-        // Start PowerShell and run the process scanning command
         ProcessBuilder builder = new ProcessBuilder(
                 "powershell.exe",
                 "-NoProfile",
                 "-Command",
                 command
         );
+
+        // PowerShell errors will also come through the same stream
+        builder.redirectErrorStream(true);
 
         try {
             Process process = builder.start();
@@ -44,49 +45,40 @@ public class ProcessScanner {
 
                     line = line.trim();
 
-                    // Ignore empty lines from the command output
                     if (line.isEmpty()) {
                         continue;
                     }
 
-                    // Output format:
-                    // PID@@@ProcessName@@@WindowTitle
+                    // Expected format:
+                    // 1234@@@chrome@@@Google Chrome
                     String[] parts = line.split("@@@", 3);
 
-                    // Skip the line if the expected values are missing
-                    if (parts.length < 3) {
+                    if (parts.length != 3) {
                         continue;
                     }
 
                     try {
-                        // Convert the process ID from text to long
                         long pid = Long.parseLong(parts[0].trim());
 
                         String name = parts[1].trim();
+                        String windowTitle = parts[2].trim();
 
-                        // Get-Process normally gives names without .exe
+                        // Get-Process returns names like chrome instead of chrome.exe
                         if (!name.toLowerCase().endsWith(".exe")) {
                             name = name + ".exe";
                         }
 
-                        String windowTitle = parts[2].trim();
-
-                        // Store the process information in a ProcessInfo object
                         ProcessInfo info =
                                 new ProcessInfo(pid, name, windowTitle);
 
                         processes.add(info);
 
                     } catch (NumberFormatException e) {
-                        // Ignore a process if the PID cannot be parsed
-                        System.out.println(
-                                "Invalid process ID: " + parts[0]
-                        );
+                        // Skip any line that does not contain a valid PID
                     }
                 }
             }
 
-            // Wait until the PowerShell command finishes
             int exitCode = process.waitFor();
 
             if (exitCode != 0) {
@@ -97,14 +89,11 @@ public class ProcessScanner {
             }
 
         } catch (IOException e) {
-            // Handles errors while starting or reading PowerShell
             System.out.println(
-                    "Failed to run PowerShell process scan: "
-                            + e.getMessage()
+                    "Failed to run PowerShell: " + e.getMessage()
             );
 
         } catch (InterruptedException e) {
-            // Restore the interrupt status if the thread gets interrupted
             Thread.currentThread().interrupt();
 
             System.out.println(
@@ -112,7 +101,6 @@ public class ProcessScanner {
             );
         }
 
-        // Return every process that was successfully read and parsed
         return processes;
     }
 }
