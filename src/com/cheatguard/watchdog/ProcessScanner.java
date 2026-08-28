@@ -13,14 +13,13 @@ public class ProcessScanner {
         // Store all detected processes here
         List<ProcessInfo> processes = new ArrayList<>();
 
-        // Get processes that have a visible window
+        // Get processes with a visible window
         // Output format: PID@@@ProcessName@@@WindowTitle
         String command =
-                "$ErrorActionPreference = 'SilentlyContinue'; " +
                 "Get-Process | " +
                 "Where-Object { $_.MainWindowTitle -ne '' } | " +
                 "ForEach-Object { " +
-                "\"$($_.Id)@@@$($_.ProcessName)@@@$($_.MainWindowTitle)\" " +
+                "'{0}@@@{1}@@@{2}' -f $_.Id, $_.ProcessName, $_.MainWindowTitle " +
                 "}";
 
         ProcessBuilder builder = new ProcessBuilder(
@@ -31,13 +30,13 @@ public class ProcessScanner {
                 command
         );
 
-        // Keep PowerShell errors visible instead of hiding them
+        // Show PowerShell errors in the same output stream
         builder.redirectErrorStream(true);
 
         try {
             Process process = builder.start();
 
-            // Read PowerShell output line by line
+            // Read the PowerShell output line by line
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
 
@@ -55,7 +54,6 @@ public class ProcessScanner {
                     // 1234@@@chrome@@@Google Chrome
                     String[] parts = line.split("@@@", 3);
 
-                    // Show unexpected PowerShell output for debugging
                     if (parts.length != 3) {
                         System.out.println(
                                 "PowerShell output: " + line
@@ -87,7 +85,6 @@ public class ProcessScanner {
                 }
             }
 
-            // Wait for PowerShell to finish
             int exitCode = process.waitFor();
 
             if (exitCode != 0) {
