@@ -13,9 +13,10 @@ public class ProcessScanner {
         // Store all detected processes here
         List<ProcessInfo> processes = new ArrayList<>();
 
-        // Get processes that currently have a visible window
-        // Format: PID@@@ProcessName@@@WindowTitle
+        // Get processes that have a visible window
+        // Output format: PID@@@ProcessName@@@WindowTitle
         String command =
+                "$ErrorActionPreference = 'SilentlyContinue'; " +
                 "Get-Process | " +
                 "Where-Object { $_.MainWindowTitle -ne '' } | " +
                 "ForEach-Object { " +
@@ -25,11 +26,12 @@ public class ProcessScanner {
         ProcessBuilder builder = new ProcessBuilder(
                 "powershell.exe",
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
                 command
         );
 
-        // PowerShell errors will also come through the same stream
+        // Keep PowerShell errors visible instead of hiding them
         builder.redirectErrorStream(true);
 
         try {
@@ -49,11 +51,15 @@ public class ProcessScanner {
                         continue;
                     }
 
-                    // Expected format:
+                    // Expected example:
                     // 1234@@@chrome@@@Google Chrome
                     String[] parts = line.split("@@@", 3);
 
+                    // Show unexpected PowerShell output for debugging
                     if (parts.length != 3) {
+                        System.out.println(
+                                "PowerShell output: " + line
+                        );
                         continue;
                     }
 
@@ -63,22 +69,25 @@ public class ProcessScanner {
                         String name = parts[1].trim();
                         String windowTitle = parts[2].trim();
 
-                        // Get-Process returns names like chrome instead of chrome.exe
+                        // Get-Process returns chrome instead of chrome.exe
                         if (!name.toLowerCase().endsWith(".exe")) {
                             name = name + ".exe";
                         }
 
-                        ProcessInfo info =
+                        ProcessInfo processInfo =
                                 new ProcessInfo(pid, name, windowTitle);
 
-                        processes.add(info);
+                        processes.add(processInfo);
 
                     } catch (NumberFormatException e) {
-                        // Skip any line that does not contain a valid PID
+                        System.out.println(
+                                "Invalid process ID: " + parts[0]
+                        );
                     }
                 }
             }
 
+            // Wait for PowerShell to finish
             int exitCode = process.waitFor();
 
             if (exitCode != 0) {
