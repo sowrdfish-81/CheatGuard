@@ -13,7 +13,7 @@ public class Main {
         ProcessScanner scanner = new ProcessScanner();
 
         // Scan running processes
-        List<ProcessInfo> processes = scanner.scanProcesses();
+        List<ProcessInfo> processes = scanner.getRunningProcesses();
 
         // Show how many processes were found
         System.out.println("Processes found: " + processes.size());
