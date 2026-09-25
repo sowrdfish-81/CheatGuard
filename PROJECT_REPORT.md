@@ -1865,7 +1865,11 @@ permitted interpreter (python) whose command line names a file outside the exam
 folder is closed and logged red; and an allowed app showing a file outside the
 exam folder is closed and logged red. The Windows recent-files lists (Start
 menu, jump lists, Open-dialog recents) are wiped at start, so nothing pre-exam
-can be reopened in one click. Folders: an Explorer window outside the exam folder is a
+can be reopened in one click. And the strongest content wall: the student's
+ACCOUNT itself is denied read access to everything outside the exam folder
+(Documents, Downloads, other drives, USB) with NTFS permissions - so no
+program, terminal or dialog can open a pre-exam file at all. Everything is
+restored at the end. Folders: an Explorer window outside the exam folder is a
 red flag. USB devices: a stick, a USB network adapter, or a phone in file mode
 is an instant alert.
 
@@ -3405,6 +3409,9 @@ public final class StrictNetworkLockdown implements Closeable {
                 "\"allowedIpFile\":\"" + jsonEscape(allowedIps.getAbsolutePath()) + "\",\n" +
                 "\"egressStatusFile\":\"" + jsonEscape(egressStatus.getAbsolutePath()) + "\",\n" +
                 "\"verifyHost\":\"" + jsonEscape(verifyHost) + "\",\n" +
+                "\"lockPathsFile\":\"" + jsonEscape(lockPathsFile.getAbsolutePath()) + "\",\n" +
+                "\"lockStatusFile\":\"" + jsonEscape(lockStatusFile.getAbsolutePath()) + "\",\n" +
+                "\"userSidForLocks\":\"" + jsonEscape(sid) + "\",\n" +
                 "\"stateFile\":\"" + jsonEscape(state.getAbsolutePath()) + "\",\n" +
                 "\"readyFile\":\"" + jsonEscape(ready.getAbsolutePath()) + "\",\n" +
                 "\"stopFile\":\"" + jsonEscape(stop.getAbsolutePath()) + "\",\n" +
@@ -3463,7 +3470,117 @@ public final class StrictNetworkLockdown implements Closeable {
         }
     }
 
+    /** Report whether the student's file-access locks applied. */
+    private void emitLockStatus() {
+        String status = "";
+        try {
+            if (lockStatusFile.isFile()) {
+                status = Files.readString(lockStatusFile.toPath(), StandardCharsets.UTF_8).trim();
+            }
+        } catch (Exception ignored) {
+        }
+        if ("ACTIVE".equalsIgnoreCase(status)) {
+            emitInfo("FILE_LOCK_ENABLED",
+                    "File walls up: the student's account cannot open files outside the exam folder "
+                            + "(Documents, Downloads, other drives, USB).");
+        } else {
+            emitInfo("FILE_LOCK_SKIPPED",
+                    "Pre-exam file blocking could not be applied; process and folder alerts stay active.");
+        }
+    }
+
+    /**
+     * Build the list of folders the student's account is locked out of for the
+     * exam: the profile's content folders, everything on the Desktop except the
+     * exam folder and shortcuts, and every drive that holds neither Windows, the
+     * profile, ProgramData nor an approved app.
+     */
 ```
+**Part 5b - the file walls:**
+
+```java
+    private List<String> buildLockPaths() {
+        File profile = com.cheatguard.config.AppPaths.getUserProfileDirectory();
+        File desktop = com.cheatguard.config.AppPaths.getDesktopDirectory();
+        Set<String> keepDrives = new java.util.HashSet<>();
+        addDriveOf(keepDrives, new File(System.getenv("SystemRoot") == null ? "C:\\" : System.getenv("SystemRoot")));
+        addDriveOf(keepDrives, profile);
+        addDriveOf(keepDrives, examFolder);
+        addDriveOf(keepDrives, com.cheatguard.config.AppPaths.getDataDirectory());
+        for (String allowed : com.cheatguard.config.AppConfig.getInstance().getAllowedProcesses()) {
+            addDriveOf(keepDrives, new File(com.cheatguard.config.AppConfig.getInstance()
+                    .getProcessPath(allowed) == null ? "C:\\" : com.cheatguard.config.AppConfig
+                    .getInstance().getProcessPath(allowed)));
+        }
+        List<File> extraRoots = new ArrayList<>();
+        for (File root : File.listRoots()) {
+            if (!keepDrives.contains(root.getAbsolutePath().toLowerCase(java.util.Locale.ROOT))) {
+                extraRoots.add(root);
+            }
+        }
+        return collectLockPaths(profile, desktop, examFolder, extraRoots);
+    }
+
+    /** Drives that must stay untouched: add the drive letter of the given path. */
+    private static void addDriveOf(Set<String> keep, File f) {
+        if (f == null) return;
+        String p = f.getAbsolutePath().toLowerCase(java.util.Locale.ROOT);
+        if (p.length() >= 3 && p.charAt(1) == ':') keep.add(p.substring(0, 3));
+    }
+
+    /**
+     * Pure path collection (testable): profile content folders, desktop children
+     * except the exam folder and shortcuts, plus the given extra drive roots.
+     */
+    public static List<String> collectLockPaths(File profile, File desktop, File examFolder,
+                                                List<File> extraRoots) {
+        List<String> out = new ArrayList<>();
+        if (profile != null && profile.isDirectory()) {
+            for (String name : new String[]{"Documents", "Downloads", "Music", "Pictures",
+                    "Videos", "Saved Games", "Contacts", "Links", "OneDrive", "3D Objects",
+                    "Searches"}) {
+                File f = new File(profile, name);
+                if (f.isDirectory()) out.add(f.getAbsolutePath());
+            }
+        }
+        if (desktop != null && desktop.isDirectory()) {
+            File[] kids = desktop.listFiles();
+            if (kids != null) {
+                for (File kid : kids) {
+                    if (examFolder != null && sameTarget(kid, examFolder)) continue;
+                    if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
+                    out.add(kid.getAbsolutePath());
+                }
+            }
+        }
+        if (extraRoots != null) {
+            for (File root : extraRoots) {
+                if (root.exists()) out.add(root.getAbsolutePath());
+            }
+        }
+        return out;
+    }
+
+    private static boolean sameTarget(File a, File b) {
+        try {
+            return a.getCanonicalPath().equalsIgnoreCase(b.getCanonicalPath());
+        } catch (Exception e) {
+            return a.getAbsolutePath().equalsIgnoreCase(b.getAbsolutePath());
+        }
+    }
+
+    /** Write the lock list so the elevated helper can apply the denies. */
+    private void writeLockPaths() {
+        List<String> paths = buildLockPaths();
+        try {
+            Files.writeString(lockPathsFile.toPath(), String.join("\n", paths) + "\n",
+                    StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+        }
+    }
+
+```
+
 
 - `writeConfig` builds the JSON the helper trusts (paths, parent PID, SID,
   verify host...).
@@ -3622,6 +3739,8 @@ $protectDoneFile = $cfg.protectDoneFile
 $allowedIpFile = [string]$cfg.allowedIpFile
 $egressStatusFile = [string]$cfg.egressStatusFile
 $verifyHost = [string]$cfg.verifyHost
+$lockPathsFile = [string]$cfg.lockPathsFile
+$lockStatusFile = [string]$cfg.lockStatusFile
 $fusKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $groupName = 'Cheat.Guard Strict Exam'
 $proxyKey = "Registry::HKEY_USERS\$($cfg.userSid)\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
@@ -3647,15 +3766,9 @@ function Ensure-FirewallServices {
         throw 'Windows NetSecurity PowerShell module is unavailable on this computer.'
     }
 }
-
 ```
+}
 
-- Reads the JSON config, defines the firewall rule group name, verifies it IS
-  admin, and makes sure the firewall services (BFE, MpsSvc) are running.
-
-**Act 2 — registry helpers and browser DoH policies:**
-
-```powershell
 function Get-RegState([string]$Path, [string]$Name) {
     try {
         $key = Get-Item -LiteralPath $Path -ErrorAction Stop
@@ -3765,6 +3878,60 @@ function Restore-Doh($DohState) {
 # once outbound port 53 is denied to other programs, stall until those servers time out -
 # which makes even approved sites fail to load). The static NameServer registry value is
 # recorded per family so an adapter that used DHCP-provided DNS goes back to DHCP.
+```powershell
+function Get-DnsState {
+    @(Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
+        $guid = $_.InterfaceGuid
+        $v4 = ''
+        $v6 = ''
+        try { $v4 = [string](Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid"  -Name NameServer -ErrorAction Stop).NameServer } catch { $v4 = '' }
+        try { $v6 = [string](Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\$guid" -Name NameServer -ErrorAction Stop).NameServer } catch { $v6 = '' }
+        [ordered]@{ InterfaceIndex=$_.ifIndex; InterfaceAlias=$_.Name; StaticNameServer=$v4; StaticNameServerV6=$v6 }
+    })
+}
+
+function Set-ExamDns {
+    param([bool]$RedirectIpv6)
+    $changed = 0
+    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })) {
+        try {
+            Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses '127.0.0.1' -ErrorAction Stop
+            $changed++
+        } catch {}
+        if ($RedirectIpv6) {
+            try { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses '::1' -ErrorAction Stop } catch {}
+        }
+    }
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    return $changed
+}
+
+function Restore-Dns($DnsState) {
+    foreach ($e in @($DnsState)) {
+        foreach ($family in @('v4','v6')) {
+            try {
+                $raw = if ($family -eq 'v4') { [string]$e.StaticNameServer } else { [string]$e.StaticNameServerV6 }
+                if ($raw -and $raw.Trim() -ne '') {
+                    $servers = @($raw.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and $_ -ne '127.0.0.1' -and $_ -ne '::1' })
+                    if ($servers.Count -gt 0) {
+                        Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ServerAddresses $servers -ErrorAction Stop
+                        continue
+                    }
+                }
+                # No static value recorded for this family: put the adapter back on DHCP.
+                # Both families must be reset - a v6-only reset would leave the adapter's
+                # IPv6 resolver on the dead ::1 exam address, and Windows prefers IPv6
+                # resolvers, stalling every lookup even though IPv4 is already correct.
+                Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ResetServerAddresses -ErrorAction Stop
+            } catch {}
+        }
+    }
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+}
+
+# Confirms the local Cheat.Guard DNS filter is actually answering before the exam is
+# allowed to start. Any reply (including NXDOMAIN) proves it is serving; a timeout means
+# resolution would be dead for approved sites too, so lockdown must be rolled back.
 ```
 
 - `Get-RegState`/`Set-RegFromState` snapshot-and-restore registry values.
@@ -3828,12 +3995,6 @@ function Restore-Dns($DnsState) {
 # allowed to start. Any reply (including NXDOMAIN) proves it is serving; a timeout means
 # resolution would be dead for approved sites too, so lockdown must be rolled back.
 ```
-
-- Per adapter, BOTH families, saved so a DHCP adapter goes back to DHCP.
-
-**Act 4 — the self-test:**
-
-```powershell
 function Test-DnsFilter {
     param([string]$Server = '127.0.0.1')
     $client = $null
@@ -3867,13 +4028,6 @@ function Test-DnsFilter {
 # signed-in user keeps read access but has no delete right and - not being the owner -
 # cannot grant itself one. Only grants are used: an explicit deny would also block the
 # elevated delete that the admin dashboard performs on purpose.
-```
-
-- `Test-DnsFilter` sends a real DNS packet to 127.0.0.1:53 and waits for ANY
-  reply — proof the filter is actually answering before the exam locks in.
-
-**Act 5 — log protection:**
-
 ```powershell
 function Protect-LogFile([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
@@ -3940,13 +4094,204 @@ function Protect-VaultDirectory([string]$Dir) {
     } catch {}
 }
 
+```
 function Remove-OurRules {
     Get-NetFirewallRule -PolicyStore PersistentStore -Group $groupName -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+}
+
+# File walls: the student's own account is DENIED read/execute/delete on every
+# folder the Java side listed (profile content folders, desktop items other than
+# the exam folder, other drives, USB). This works at the NTFS layer, so EVERY
+# program running as the student - VS Code's terminal, Explorer, anything - hits
+# "Access denied" outside the exam folder. Denies are per-SID and inherit down.
+function Set-FileAccessLocks([string]$ListFile, [string]$Sid) {
+    $locked = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($ListFile) -or [string]::IsNullOrWhiteSpace($Sid)) { return $locked }
+    if (-not (Test-Path -LiteralPath $ListFile)) { return $locked }
+    foreach ($line in @(Get-Content -LiteralPath $ListFile -ErrorAction SilentlyContinue)) {
+        $p = $line.Trim()
+        if (-not $p -or -not (Test-Path -LiteralPath $p)) { continue }
+        try {
+            icacls "$p" /deny "*$($Sid):(OI)(CI)(RX,D)" | Out-Null
+            $locked.Add($p)
+        } catch {}
+    }
+    return $locked
+}
+
+function Restore-FileAccess([string[]]$Paths, [string]$Sid) {
+    foreach ($p in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        try { icacls "$p" /remove:d "*$Sid" | Out-Null } catch {}
+    }
 }
 
 # VPN concentrators and remote-desktop relays speak on fixed ports that no exam
 # traffic uses. Additive Block rules, the same safe pattern as the DoT rules;
 # they also cover hand-rolled tunnelling tools the process sweep cannot name.
+function Add-TunnelPortBlocks {
+    $blocks = @(
+        @{ Name = 'block VPN / IPsec / WireGuard ports'; Protocol = 'UDP'; Port = '500,4500,1194,51820' },
+        @{ Name = 'block PPTP and outbound RDP';         Protocol = 'TCP'; Port = '1723,3389' },
+        @{ Name = 'block VNC ports';                     Protocol = 'TCP'; Port = '5900-5910' },
+        @{ Name = 'block QUIC (HTTP/3)';                 Protocol = 'UDP'; Port = '443' }
+    )
+    foreach ($b in $blocks) {
+        New-NetFirewallRule -PolicyStore PersistentStore `
+            -DisplayName ('Cheat.Guard - ' + $b.Name) -Group $groupName `
+            -Direction Outbound -Protocol $b.Protocol -RemotePort $b.Port `
+            -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
+# The Java filter writes every address an approved domain resolved to into the
+# IP file; these are the only destinations the web ports may reach.
+function Read-AllowedIps {
+    if ([string]::IsNullOrWhiteSpace($allowedIpFile)) { return @() }
+    if (-not (Test-Path -LiteralPath $allowedIpFile)) { return @() }
+    $ips = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($line in @(Get-Content -LiteralPath $allowedIpFile -ErrorAction SilentlyContinue)) {
+            $v = $line.Trim()
+            if (-not $v) { continue }
+            $ip = $null
+            if ([System.Net.IPAddress]::TryParse($v, [ref]$ip)) {
+                if (-not $ip.IsIPv6LinkLocal -and -not $ip.Equals([System.Net.IPAddress]::Loopback) -and -not $ip.Equals([System.Net.IPAddress]::IPv6Loopback)) {
+                    $ips.Add($v)
+                }
+            }
+            if ($ips.Count -ge 400) { break }
+        }
+    } catch {}
+    return $ips.ToArray()
+}
+
+function Set-AllowedDestinationRules([string[]]$Ips) {
+    Get-NetFirewallRule -PolicyStore PersistentStore -Group $groupName -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Cheat.Guard - allowed web destinations*' } |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    if ($Ips.Count -lt 1) { return }
+    New-NetFirewallRule -PolicyStore PersistentStore `
+        -DisplayName 'Cheat.Guard - allowed web destinations (TCP)' -Group $groupName `
+        -Direction Outbound -Protocol TCP -RemotePort 80,443 -RemoteAddress $Ips `
+        -Action Allow -Profile Any -ErrorAction Stop | Out-Null
+}
+
+# Plain TCP reachability of an approved domain on 443 - proves the allowlist
+# actually carries traffic on this network without any HTTP/certificate quirks.
+function Test-HttpsReachable([string]$Target) {
+    if ([string]::IsNullOrWhiteSpace($Target)) { return $false }
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect($Target, 443, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne(8000)) { return $false }
+        $client.EndConnect($async) | Out-Null
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        try { $client.Close() } catch {}
+    }
+}
+
+# The full egress lockdown: outbound web traffic is denied by default and only the
+# resolved addresses of approved domains (plus the local gateway, so campus
+# captive portals and 802.1X page logins keep working) may pass. Verified against
+# a real approved site; on a network where that fails, everything is rolled back
+# and the session continues in DNS-only mode rather than risking a dead network.
+function Apply-EgressLockdown {
+    $ips = @(Read-AllowedIps)
+    if ($ips.Count -lt 1) { return $false }
+    Set-AllowedDestinationRules $ips
+
+    $gateways = @()
+    try {
+        $gateways = @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty NextHop -Unique | Where-Object { $_ -and $_ -ne '0.0.0.0' -and $_ -ne '::' })
+    } catch {}
+    if ($gateways.Count -ge 1) {
+        New-NetFirewallRule -PolicyStore PersistentStore `
+            -DisplayName 'Cheat.Guard - local network gateway' -Group $groupName `
+            -Direction Outbound -RemoteAddress $gateways `
+            -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    foreach ($p in @(Get-NetFirewallProfile -ErrorAction SilentlyContinue)) {
+        try { Set-NetFirewallProfile -Profile $p.Name -DefaultOutboundAction Block -ErrorAction Stop } catch {}
+    }
+
+    $verified = $false
+    try { $verified = Test-HttpsReachable $verifyHost } catch { $verified = $false }
+    if (-not $verified) {
+        foreach ($p in @($state.Profiles)) {
+            try { Set-NetFirewallProfile -Profile $p.Name -Enabled $p.Enabled -DefaultOutboundAction $p.DefaultOutboundAction -ErrorAction Stop } catch {}
+        }
+        Get-NetFirewallRule -PolicyStore PersistentStore -Group $groupName -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like 'Cheat.Guard - allowed web destinations*' -or $_.DisplayName -like 'Cheat.Guard - local network gateway' } |
+            Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        return $false
+    }
+    return $true
+}
+
+# Hides the "Switch user" entry so a pre-existing second local account cannot be
+# used mid-exam. The previous value is snapshotted and Restore-All puts it back.
+```powershell
+function Get-FusState {
+    try {
+        $p = Get-ItemProperty -LiteralPath $fusKey -Name 'HideFastUserSwitching' -ErrorAction Stop
+        return @{ Exists = $true; Value = [int]$p.HideFastUserSwitching }
+    } catch {
+        return @{ Exists = $false; Value = $null }
+    }
+}
+
+function Set-FusHidden {
+    try {
+        if (-not (Test-Path -LiteralPath $fusKey)) { New-Item -Path $fusKey -Force -ErrorAction Stop | Out-Null }
+        New-ItemProperty -LiteralPath $fusKey -Name 'HideFastUserSwitching' -PropertyType DWord -Value 1 -Force -ErrorAction Stop | Out-Null
+    } catch {}
+}
+
+function Restore-Fus($Fus) {
+    try {
+        if ($Fus.Exists) {
+            Set-ItemProperty -LiteralPath $fusKey -Name 'HideFastUserSwitching' -Value ([int]$Fus.Value) -ErrorAction Stop
+        } else {
+            Remove-ItemProperty -LiteralPath $fusKey -Name 'HideFastUserSwitching' -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
+
+function Restore-All {
+    Remove-OurRules
+    if (-not (Test-Path -LiteralPath $stateFile)) { return }
+    $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+
+    foreach ($p in @($state.Profiles)) {
+        try {
+            Set-NetFirewallProfile -Profile $p.Name -Enabled $p.Enabled -DefaultOutboundAction $p.DefaultOutboundAction -ErrorAction Stop
+        } catch {}
+    }
+
+    if (Test-Path -LiteralPath $proxyKey) {
+        Set-RegFromState $proxyKey 'ProxyEnable' $state.Proxy.ProxyEnable
+        Set-RegFromState $proxyKey 'ProxyServer' $state.Proxy.ProxyServer
+        Set-RegFromState $proxyKey 'ProxyOverride' $state.Proxy.ProxyOverride
+        Set-RegFromState $proxyKey 'AutoConfigURL' $state.Proxy.AutoConfigURL
+        Notify-InternetSettings
+    }
+
+    Restore-Dns $state.Dns
+    Restore-Doh $state.Doh
+    Restore-Fus $state.Fus
+    Restore-FileAccess $state.FileLocks $cfg.userSid
+    Remove-Item -LiteralPath $egressStatusFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $lockStatusFile -Force -ErrorAction SilentlyContinue
+
+    Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+}
+
 ```
 
 - `Protect-LogFile` = takeown + icacls (Administrators full, SYSTEM full,
@@ -3954,7 +4299,7 @@ function Remove-OurRules {
   inside OUR roots (network dir or vault dir) — so a bug can never be turned
   into "ACL-bomb any folder on the PC".
 
-**Act 6 — the firewall functions:**
+**Act 6 — the firewall functions and the file-wall functions:**
 
 ```powershell
 function Add-TunnelPortBlocks {
@@ -4065,16 +4410,231 @@ function Apply-EgressLockdown {
 # Hides the "Switch user" entry so a pre-existing second local account cannot be
 # used mid-exam. The previous value is snapshotted and Restore-All puts it back.
 ```
+try {
+    Assert-Administrator
+    Ensure-FirewallServices
 
-- `Add-TunnelPortBlocks` — VPN/IPsec/WireGuard/PPTP/RDP/VNC/QUIC port blocks.
-- `Read-AllowedIps` — parse the IP file, validate with TryParse, cap 400.
-- `Set-AllowedDestinationRules` — recreate the TCP 80,443 allow rule.
-- `Test-HttpsReachable` — raw TcpClient connect on 443, 8 s timeout.
-- `Apply-EgressLockdown` — allow rules → gateway rule → DefaultOutboundAction
-  Block on every profile → VERIFY → on failure roll back and return false.
+    if ($RecoverOnly) {
+        Restore-All
+        'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
+        exit 0
+    }
 
-**Act 7 — fast user switching + Restore-All:**
+    Remove-Item -LiteralPath $readyFile,$stopFile,$restoredFile,$errorFile -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $cfg.programPath)) {
+        throw "Cheat.Guard executable path was not found: $($cfg.programPath)"
+    }
 
+    # Recover a previous interrupted session before taking a fresh snapshot.
+    if (Test-Path -LiteralPath $stateFile) { Restore-All }
+
+    $profiles = @(Get-NetFirewallProfile | ForEach-Object {
+        [ordered]@{ Name=$_.Name; Enabled=$_.Enabled.ToString(); DefaultOutboundAction=$_.DefaultOutboundAction.ToString() }
+    })
+    $state = [ordered]@{
+        UserSid = $cfg.userSid
+        Profiles = $profiles
+        Proxy = [ordered]@{
+            ProxyEnable = Get-RegState $proxyKey 'ProxyEnable'
+            ProxyServer = Get-RegState $proxyKey 'ProxyServer'
+            ProxyOverride = Get-RegState $proxyKey 'ProxyOverride'
+            AutoConfigURL = Get-RegState $proxyKey 'AutoConfigURL'
+        }
+        Dns = Get-DnsState
+        Doh = Get-DohState
+        Fus = Get-FusState
+        FileLocks = @()
+    }
+    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
+
+    Set-FusHidden
+
+    # A user-configured proxy is a complete bypass: the browser hands the request to
+    # the proxy, which resolves names and connects on its own, never touching the
+    # local DNS filter. The original settings were snapshotted above and Restore-All
+    # puts them back, so user proxy and PAC are force-disabled for the exam and all
+    # browsing goes direct - where the DNS allowlist applies. (An older build's
+    # leftover loopback proxy, which points at a port nothing listens on, is covered
+    # by the same disable step.)
+    try {
+        Set-ItemProperty -LiteralPath $proxyKey -Name 'ProxyEnable' -Value 0 -ErrorAction Stop
+        Remove-ItemProperty -LiteralPath $proxyKey -Name 'ProxyServer' -ErrorAction SilentlyContinue
+        Remove-ItemProperty -LiteralPath $proxyKey -Name 'AutoConfigURL' -ErrorAction SilentlyContinue
+        Notify-InternetSettings
+    } catch {}
+    $state.Proxy.ProxyEnable = [ordered]@{ Exists=$false; Kind=''; Value=$null }
+    $state.Proxy.ProxyServer = [ordered]@{ Exists=$false; Kind=''; Value=$null }
+    $state.Proxy.AutoConfigURL = [ordered]@{ Exists=$false; Kind=''; Value=$null }
+    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
+
+    # Strict default-deny is essential: it prevents an unsupported browser, a browser installed
+    # in an unusual path, or another application from bypassing the proxy during the exam.
+    # The original profile settings were snapshotted above and Restore-All puts them back.
+    Remove-OurRules
+
+    # Enforcement is at name resolution, not at the socket layer. An earlier design set
+    # every profile's DefaultOutboundAction to Block and allowed browsers to reach only a
+    # local proxy port; that blocked unapproved sites but also killed approved ones on any
+    # machine where a browser did not honour the injected proxy setting. The firewall is now
+    # used only for narrow, additive Block rules that cannot break normal traffic.
+
+    # Close the DNS-over-HTTPS escape at the network layer as well as by policy: deny TCP 443
+    # to the well-known public DoH resolvers. Ordinary websites are unaffected, and the
+    # Cheat.Guard filter's own upstream lookups use UDP/TCP 53, not 443.
+    $dohResolvers = @(
+        '1.1.1.1','1.0.0.1','8.8.8.8','8.8.4.4','9.9.9.9','149.112.112.112',
+        '208.67.222.222','208.67.220.220','94.140.14.14','94.140.15.15','45.90.28.0/24','45.90.30.0/24'
+    )
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - block DoH resolvers' -Group $groupName -Direction Outbound -Protocol TCP -RemoteAddress $dohResolvers -RemotePort 443 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+
+    # Deny DNS-over-TLS entirely (TCP and UDP 853): a custom resolver or a Windows 11
+    # DoT setting would otherwise tunnel around the local filter the same way DoH would.
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - block DoT TCP' -Group $groupName -Direction Outbound -Protocol TCP -RemotePort 853 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - block DoT UDP' -Group $groupName -Direction Outbound -Protocol UDP -RemotePort 853 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+
+    # A custom tool could bypass the local filter by querying a well-known public
+    # resolver directly (nslookup facebook.com 8.8.8.8). Block port 53 to those
+    # resolvers. The filter's own upstreams never use this list: the Java side drops
+    # captured system resolvers that appear here and falls back to Quad9 unfiltered
+    # endpoints instead, so its own path stays open.
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - block public resolver 53 TCP' -Group $groupName -Direction Outbound -Protocol TCP -RemoteAddress $dohResolvers -RemotePort 53 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - block public resolver 53 UDP' -Group $groupName -Direction Outbound -Protocol UDP -RemoteAddress $dohResolvers -RemotePort 53 -Action Block -Profile Any -ErrorAction SilentlyContinue | Out-Null
+
+    # Keep the Cheat.Guard process explicitly permitted outbound so its upstream DNS keeps
+    # working even on a machine whose profiles already default to Block.
+    New-NetFirewallRule -PolicyStore PersistentStore -DisplayName 'Cheat.Guard - filter host outbound' -Group $groupName -Direction Outbound -Program $cfg.programPath -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+
+    # ---- tunnel/remote-access hardening, then the egress web lockdown ----
+    Add-TunnelPortBlocks
+    $script:lastIps = ''
+    $script:egressActive = $false
+    if ((-not [string]::IsNullOrWhiteSpace($allowedIpFile)) -and (-not [string]::IsNullOrWhiteSpace($verifyHost))) {
+        try {
+            $script:egressActive = Apply-EgressLockdown
+            $script:lastIps = (@(Read-AllowedIps) -join ',')
+        } catch {
+            $script:egressActive = $false
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($egressStatusFile)) {
+        if ($script:egressActive) { 'ACTIVE' | Set-Content -LiteralPath $egressStatusFile -Encoding ASCII }
+        else { 'FALLBACK' | Set-Content -LiteralPath $egressStatusFile -Encoding ASCII }
+    }
+
+    # ---- file walls: deny the student's account everything outside the exam folder ----
+    $script:fileLocks = @()
+    if ((-not [string]::IsNullOrWhiteSpace($lockPathsFile)) -and (Test-Path -LiteralPath $lockPathsFile)) {
+        try { $script:fileLocks = @(Set-FileAccessLocks $lockPathsFile $cfg.userSid) } catch { $script:fileLocks = @() }
+    }
+    $state.FileLocks = @($script:fileLocks)
+    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
+    if (-not [string]::IsNullOrWhiteSpace($lockStatusFile)) {
+        if ($script:fileLocks.Count -ge 1) { 'ACTIVE' | Set-Content -LiteralPath $lockStatusFile -Encoding ASCII }
+        else { 'SKIPPED' | Set-Content -LiteralPath $lockStatusFile -Encoding ASCII }
+    }
+
+    # Force browsers onto the system resolver, then point the system resolver at the
+    # Cheat.Guard DNS filter. Unapproved domains then fail to resolve for every program,
+    # while approved domains resolve normally and connect over their usual direct path.
+    Disable-BrowserDoh
+    $redirectIpv6 = [bool]$cfg.dnsIpv6
+    $dnsChanged = Set-ExamDns -RedirectIpv6 $redirectIpv6
+    if ($dnsChanged -lt 1) {
+        throw 'Could not redirect any network adapter to the Cheat.Guard DNS filter (127.0.0.1). Check that a network adapter is connected.'
+    }
+    if (-not (Test-DnsFilter '127.0.0.1')) {
+        throw 'The Cheat.Guard DNS filter on 127.0.0.1:53 did not answer a test lookup. Lockdown has been rolled back so the computer keeps working; start the exam again.'
+    }
+
+    # Chromium/Firefox cache DoH and resolver state, so restart them once when exam mode
+    # begins to make sure the policy and the redirected DNS are picked up.
+    foreach ($name in @('chrome','msedge','firefox','brave','opera','opera_gx','vivaldi','iexplore')) {
+        Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 700
+
+    # Verify DNS redirection before telling the Java app that lockdown is ready.
+    $dnsOk = @(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses -contains '127.0.0.1' }).Count
+    if ($dnsOk -lt 1) { throw 'DNS redirection verification failed: no adapter is using the Cheat.Guard DNS filter.' }
+    if (-not (Test-DnsFilter '127.0.0.1')) { throw 'The Cheat.Guard DNS filter stopped answering during verification.' }
+
+    # Keep new or re-connected adapters on the filter for the whole session. A USB
+    # Wi-Fi dongle or a re-connected Ethernet adapter comes up with DHCP DNS and
+    # would resolve straight through the real resolvers, bypassing the exam allowlist.
+    $redirectedIfIndex = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($e in @($state.Dns)) { if ($e.InterfaceIndex) { [void]$redirectedIfIndex.Add([string]$e.InterfaceIndex) } }
+    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })) {
+        [void]$redirectedIfIndex.Add([string]$a.ifIndex)
+    }
+
+    # This directory holds the session's control markers (stop, protect-request) and
+    # the helper configuration. Restrict it to Administrators now that the app itself
+    # runs elevated: the signed-in account keeps read access but can no longer forge
+    # a stop marker to silently end the lockdown, rewrite the helper configuration,
+    # or swap this script while the UAC prompt is on screen.
+    try {
+        $networkRoot = Split-Path -Parent $Config
+        takeown /F "$networkRoot" /A | Out-Null
+        icacls "$networkRoot" /inheritance:r | Out-Null
+        icacls "$networkRoot" /grant "*S-1-5-32-544:(OI)(CI)(F)" | Out-Null   # Administrators: full
+        icacls "$networkRoot" /grant "*S-1-5-18:(OI)(CI)(F)"     | Out-Null   # SYSTEM: full
+        icacls "$networkRoot" /grant "*S-1-5-32-545:(OI)(CI)(RX)" | Out-Null  # Users: read+execute only
+    } catch {}
+
+    'READY' | Set-Content -LiteralPath $readyFile -Encoding ASCII
+
+    $loopCount = 0
+    while ($true) {
+        if (Test-Path -LiteralPath $stopFile) { break }
+        if (-not (Get-Process -Id ([int]$cfg.parentPid) -ErrorAction SilentlyContinue)) { break }
+        Handle-ProtectRequest
+        $loopCount++
+        if ($script:egressActive -and ($loopCount % 10) -eq 0) {
+            # Approved pages resolve new CDN addresses mid-exam; the allow rule follows.
+            $ips = @(Read-AllowedIps)
+            if ($ips.Count -ge 1) {
+                $blob = $ips -join ','
+                if ($blob -ne $script:lastIps) {
+                    try {
+                        Set-AllowedDestinationRules $ips
+                        $script:lastIps = $blob
+                    } catch {}
+                }
+            }
+        }
+        foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })) {
+            $key = [string]$a.ifIndex
+            if (-not $redirectedIfIndex.Contains($key)) {
+                try {
+                    Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses '127.0.0.1' -ErrorAction Stop
+                    if ($redirectIpv6) {
+                        try { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses '::1' -ErrorAction Stop } catch {}
+                    }
+                    [void]$redirectedIfIndex.Add($key)
+                } catch {}
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    # The app seals the log just before asking for shutdown, so serve one last request.
+    Handle-ProtectRequest
+
+    Restore-All
+    'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
+    exit 0
+} catch {
+    $msg = @(
+        'Cheat.Guard strict-network helper failed.',
+        ('Message: ' + $_.Exception.Message),
+        ('Type: ' + $_.Exception.GetType().FullName),
+        ('PowerShell: ' + $PSVersionTable.PSVersion.ToString()),
+        ('Windows user: ' + [Security.Principal.WindowsIdentity]::GetCurrent().Name)
+    ) -join [Environment]::NewLine
+    try { $msg | Set-Content -LiteralPath $errorFile -Encoding UTF8 } catch {}
+    try { Restore-All } catch {}
+    exit 1
+}
 ```powershell
 function Get-FusState {
     try {
@@ -5242,6 +5802,19 @@ public final class AllowedAppLauncher {
         }
 
         try {
+            // Packaged runs are elevated: launching directly would start the app as
+            // ADMIN, which would bypass the student's file-access locks. Handing the
+            // launch to Explorer starts it in the STUDENT's session instead. A
+            // temporary shortcut carries the exam-folder argument and working dir.
+            boolean elevatedRun = new File(
+                    System.getProperty("jpackage.app-path", "")).isFile();
+            if (elevatedRun) {
+                File lnk = createStudentShortcut(executable, examFolder, name);
+                if (lnk != null) {
+                    new ProcessBuilder("explorer.exe", lnk.getAbsolutePath()).start();
+                    return null;
+                }
+            }
             ProcessBuilder pb = FOLDER_AWARE.contains(name)
                     ? new ProcessBuilder(executable.getAbsolutePath(), examFolder.getAbsolutePath())
                     : new ProcessBuilder(executable.getAbsolutePath());
@@ -5253,6 +5826,33 @@ public final class AllowedAppLauncher {
             return null;
         } catch (Exception e) {
             return "Could not start " + ProcessWhitelist.friendlyName(name) + ": " + e.getMessage();
+        }
+    }
+
+    /**
+     * Build a one-click shortcut in the exam folder that starts the approved app
+     * with the exam folder as argument and working directory. The shortcut also
+     * stays behind as a student-friendly launcher for the rest of the session.
+     */
+    private static File createStudentShortcut(File exe, File examFolder, String name) {
+        try {
+            File lnk = new File(examFolder, "Launch " + ProcessWhitelist.friendlyName(name) + ".lnk");
+            String ps = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"
+                    + lnk.getAbsolutePath().replace("'", "''") + "');"
+                    + "$s.TargetPath='" + exe.getAbsolutePath().replace("'", "''") + "';"
+                    + (FOLDER_AWARE.contains(name)
+                        ? "$s.Arguments='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
+                        : "")
+                    + "$s.WorkingDirectory='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
+                    + "$s.Save()";
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-WindowStyle", "Hidden", "-Command", ps)
+                    .redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            return lnk.isFile() ? lnk : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -5391,7 +5991,7 @@ invigilator sees, how we built the one-file installer, and how we tested it all.
 ---
 
 # PART C — MEMBER 3: UI, Installer & Testing
-*(Main.java + the gui package + the build + the 62 checks)*
+*(Main.java + the gui package + the build + the 68 checks)*
 
 ## C1. What I say (about 3 minutes)
 
@@ -5411,7 +6011,7 @@ slow job runs on a worker thread and the screen is updated only through
 
 The installer: one script compiles the code, packs a jar, then `jpackage` with
 WiX produces ONE setup exe with its own trimmed Java runtime. The testing: our
-own automatic suite with 62 checks in 13 groups — all pass. My teammate will
+own automatic suite with 68 checks in 14 groups — all pass. My teammate will
 take questions on my part too if I miss anything."
 
 ## C2. Main.java — full code, part by part (1,077 lines)
@@ -8137,7 +8737,7 @@ endlocal
    learned; `--compress zip-6` keeps it small). Output renamed to
    `dist\CheatGuard-Setup.exe` (~40 MB).
 
-## C8. test/CoreFlowTest.java — the 62 checks, full code
+## C8. test/CoreFlowTest.java — the 68 checks, full code
 
 ### Group runners and helpers
 
@@ -8153,6 +8753,7 @@ import com.cheatguard.security.Sha256Signer;
 import com.cheatguard.watchdog.DnsAllowlistServer;
 import com.cheatguard.watchdog.ProcessInfo;
 import com.cheatguard.watchdog.ProcessScanner;
+import com.cheatguard.watchdog.WatchdogEngine;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -8189,6 +8790,10 @@ public class CoreFlowTest {
         checkLogInjection();
         checkSeverityLevels();
         checkAnswerIpParsing();
+        checkTitlePathRule();
+        checkEditorTitleRule();
+        checkRuntimeArgRule();
+        checkLockPathCollection();
 
         System.out.println();
         if (failures == 0) {
@@ -8202,11 +8807,6 @@ public class CoreFlowTest {
     // ------------------------------------------------------------- credentials
 
 ```
-
-- `main()` calls ten `checkXxx()` groups; `expect()` prints PASS/FAIL and
-  counts failures; exit code 1 on any failure (scripts can detect it). Runs
-  with `-Dcheatguard.data.dir=<temp>` — AppPaths honours it, so the real
-  machine is never touched.
 
 ### checkAdminAuth — the password cycle (10 checks)
 
@@ -8261,10 +8861,6 @@ public class CoreFlowTest {
     // ------------------------------------------------------------------- vault
 
 ```
-
-Real save/verify against temp files: unconfigured at first, weak passwords
-refused, input wiped, empty input costs nothing, four wrong tries refused, the
-fifth locks out, and even the CORRECT password is refused while locked.
 
 ### checkVault — sealing (7 checks)
 
@@ -8333,9 +8929,6 @@ fifth locks out, and even the CORRECT password is refused while locked.
 
 ```
 
-Real encrypt → sign → delete plaintext → decrypt with the right password →
-refuse a wrong one → detect a tampered vault → delete vault + signature.
-
 ### checkSiteNormalize — domain rules (6 checks)
 
 ```java
@@ -8352,9 +8945,6 @@ refuse a wrong one → detect a tampered vault → delete vault + signature.
     // --------------------------------------------------------------------- DNS
 
 ```
-
-Bare host, https URL, `*.` wildcard, single word rejected, trailing dots,
-uppercase — all become one clean canonical name.
 
 ### checkDnsServer — the live filter (5 checks)
 
@@ -8433,9 +9023,6 @@ uppercase — all become one clean canonical name.
 
 ```
 
-Binds REAL sockets on loopback: blocked host → NXDOMAIN, allowed host →
-forwarded answer, second lookup served from cache.
-
 ### checkDnsWireParser + checkSpoofRejection — bytes (5 checks)
 
 ```java
@@ -8502,10 +9089,6 @@ forwarded answer, second lookup served from cache.
 
 ```
 
-Hand-crafted DNS byte packets: the parser reads names and rejects tiny
-packets; the anti-spoof validator accepts the correct reply and rejects a
-wrong transaction ID or a wrong question.
-
 ### checkLogInjection — the forgery defense (2 checks)
 
 ```java
@@ -8521,6 +9104,122 @@ wrong transaction ID or a wrong question.
                 line.contains("desc line2 tabbed") && !line.contains(TAB));
     }
 
+```
+
+### checkTitlePathRule — drive paths in titles (5 checks)
+
+```java
+    private static void checkTitlePathRule() {
+        section("Allowed-app title path rule");
+        String exam = "C:" + '\\' + "Users" + '\\' + "t" + '\\' + "Desktop" + '\\' + "Exam_1";
+        expect("title without any drive path is clean",
+                WatchdogEngine.titlePathOutside("notes.txt - Notepad", exam) == null);
+        expect("title showing the exam folder is clean",
+                WatchdogEngine.titlePathOutside(exam + '\\' + "main.cpp - Notepad++", exam) == null);
+        expect("title showing an outside drive path is flagged",
+                WatchdogEngine.titlePathOutside("C:" + '\\' + "Users" + '\\' + "t"
+                        + '\\' + "notes.txt - Notepad++", exam) != null);
+        expect("forward-slash outside path is flagged too",
+                WatchdogEngine.titlePathOutside("D:/stuff/cheat.txt - Editor", exam) != null);
+        expect("blank title is clean",
+                WatchdogEngine.titlePathOutside("", exam) == null);
+    }
+
+```
+
+### checkEditorTitleRule — foreign folder segments (6 checks)
+
+```java
+    private static void checkEditorTitleRule() {
+        section("Allowed editor folder-segment rule");
+        String vs = "Visual Studio Code";
+        expect("title with the exam folder is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "main.cpp - Exam_1 - " + vs, vs, "Exam_1", null));
+        expect("title with a foreign folder is flagged",
+                WatchdogEngine.editorShowsOutsideFolder(
+                        "notes.py - CheatNotes - " + vs, vs, "Exam_1", null));
+        expect("welcome page is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Get Started - " + vs, vs, "Exam_1", null));
+        expect("folder-only exam title is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Exam_1 - " + vs, vs, "Exam_1", null));
+        expect("untitled scratch tab is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Untitled-1 - " + vs, vs, "Exam_1", null));
+        expect("title not matching the editor suffix is ignored",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "notes.py - CheatNotes - Some App", vs, "Exam_1", null));
+    }
+
+```
+
+### checkRuntimeArgRule — interpreter command lines (5 checks)
+
+```java
+    private static void checkRuntimeArgRule() {
+        section("Allowed runtime argument rule");
+        String exam = "C:" + '\\' + "Users" + '\\' + "t" + '\\' + "Desktop" + '\\' + "Exam_1";
+        expect("exam-folder script argument is clean",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "-u", exam + '\\' + "solve.py"}, exam) == null);
+        expect("outside script argument is flagged",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "-u", "D:" + '\\' + "cheat" + '\\' + "solve.py"}, exam) != null);
+        expect("vs code tooling paths are ignored",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "C:" + '\\' + "Users" + '\\' + "t" + '\\' + ".vscode"
+                                + '\\' + "adapter.py"}, exam) == null);
+        expect("flag-only arguments are clean",
+                WatchdogEngine.runtimeArgOutside(new String[]{"-m", "jedi"}, exam) == null);
+        expect("no arguments is clean",
+                WatchdogEngine.runtimeArgOutside(null, exam) == null);
+    }
+
+```
+
+### checkLockPathCollection — file walls (6 checks)
+
+```java
+    private static void checkLockPathCollection() throws Exception {
+        section("File-access lock path collection");
+        java.io.File base = new java.io.File(System.getProperty("java.io.tmpdir"),
+                "cgt-" + System.nanoTime());
+        java.io.File profile = new java.io.File(base, "profile");
+        java.io.File documents = new java.io.File(profile, "Documents");
+        java.io.File downloads = new java.io.File(profile, "Downloads");
+        java.io.File desktop = new java.io.File(base, "Desktop");
+        java.io.File exam = new java.io.File(desktop, "Exam_1");
+        java.io.File cheat = new java.io.File(desktop, "CheatNotes");
+        java.io.File lnk = new java.io.File(desktop, "shortcut.lnk");
+        java.io.File note = new java.io.File(desktop, "note.txt");
+        java.io.File root = new java.io.File(base, "Ddrive");
+        for (java.io.File f : new java.io.File[]{documents, downloads, desktop, exam, cheat, root}) {
+            f.mkdirs();
+        }
+        lnk.createNewFile();
+        note.createNewFile();
+        java.util.List<java.io.File> roots = java.util.Arrays.asList(root,
+                new java.io.File(base, "Missing"));
+        java.util.List<String> paths = com.cheatguard.watchdog.StrictNetworkLockdown
+                .collectLockPaths(profile, desktop, exam, roots);
+        expect("profile content folders are locked",
+                paths.contains(documents.getAbsolutePath())
+                        && paths.contains(downloads.getAbsolutePath()));
+        expect("foreign desktop folder is locked", paths.contains(cheat.getAbsolutePath()));
+        expect("exam folder is never locked", !paths.contains(exam.getAbsolutePath()));
+        expect("shortcuts are never locked", !paths.contains(lnk.getAbsolutePath()));
+        expect("loose desktop files are locked", paths.contains(note.getAbsolutePath()));
+        expect("extra drive roots are locked and missing roots skipped",
+                paths.contains(root.getAbsolutePath())
+                        && !paths.contains(new java.io.File(base, "Missing").getAbsolutePath()));
+        for (java.io.File f : new java.io.File[]{documents, downloads, exam, cheat, root,
+                desktop, profile, base}) {
+            f.delete();
+        }
+    }
+
     private static final String CRLF = new String(new char[]{'\r', '\n'});
     private static final String LF = new String(new char[]{'\n'});
     private static final String CR = new String(new char[]{'\r'});
@@ -8529,9 +9228,6 @@ wrong transaction ID or a wrong question.
     // --------------------------------------------------------- log levels
 
 ```
-
-A malicious type/description with CRLF/LF/tab must come out flattened — no
-forged lines survive into the stored log.
 
 ### checkSeverityLevels + checkAnswerIpParsing (10 checks)
 
@@ -8576,6 +9272,11 @@ forged lines survive into the stored log.
 
     // ----------------------------------------------------------------- scanner
 
+```
+
+### checkProcessScanner + helpers
+
+```java
     private static void checkProcessScanner() {
         section("ProcessScanner (visible apps)");
         ProcessScanner scanner = new ProcessScanner();
@@ -8586,15 +9287,6 @@ forged lines survive into the stored log.
 
     // ------------------------------------------------------------------ helpers
 
-```
-
-NOTICE is not a red flag; rows show OK/WARN/ALERT; stored lines round-trip
-through `formatRaw`; the crafted DNS answer yields exactly `104.16.205.15`;
-a truncated packet yields nothing.
-
-### checkProcessScanner + helpers
-
-```java
     private static void expect(String label, boolean condition) {
         System.out.println((condition ? "  PASS  " : "  FAIL  ") + label);
         if (!condition) failures++;
@@ -8621,9 +9313,6 @@ a truncated packet yields nothing.
     }
 }
 ```
-
-The real PowerShell probe runs and returns (environment-independent). The
-`expect`/`section` helpers print the PASS/FAIL lines you saw in the test run.
 
 ## C9. OOP concepts in my part (with the real places)
 
@@ -8705,31 +9394,15 @@ room, and seals the evidence."
 3. Someone with the PC's own administrator password is above any program on it.
    We detect tampering and force a visible reset; a university portal with
    server-side accounts would close this fully.
-4. Allowed apps were the open door for pre-exam content, so we closed it from
-   five sides: allowed apps are CLOSED at session start and reopened on the
-   exam folder; the Windows recent-files lists are wiped; allowed-app window
-   titles are watched (a file outside the exam folder shown inside an allowed
-   app is closed and logged red); editor tab titles must carry the exam
-   folder's name (a foreign folder is a red alert); and permitted runtimes
-   (python) are checked by COMMAND LINE - running a file from outside the exam
-   folder through python is closed and logged red. What remains: a note typed
-   into an editor with no file name at all - no monitor can read a program's
-   mind.
-
-## Numbers to memorize
-
-| Fact | Value |
-|---|---|
-| Java classes / lines | 34 classes, ~5,900 lines |
-| PowerShell helper | 682 lines |
-| Tests | 62 checks, 13 groups |
-| Password hashing | PBKDF2-HMAC-SHA256, 210,000 rounds, 16-byte salt |
-| Log sealing | AES-256-CBC + SHA-256 signature |
-| Password rule | 8+ chars, letters + number/symbol |
-| Wrong tries | 5 → lockout 30 s doubling, max 15 min |
-| DNS filter | 127.0.0.1:53 + ::1:53, cache 30 s |
-| Watchdog cycle | every 1.2 s; startup grace 60 s |
-| Installer | one exe, ~40 MB, own Java runtime |
+4. Pre-exam content was the open door through allowed apps, so it is now
+   closed from five sides: allowed apps start FRESH (closed at session start,
+   relaunched on the exam folder in the student's own session), the recent-file
+   lists are wiped, editor tab titles must carry the exam folder's name,
+   permitted interpreters are checked by command line, and - the strongest
+   layer - the student's account is denied read access to everything outside
+   the exam folder by NTFS permissions. What remains: a note typed into an
+   editor with no file name at all during the exam - no monitor can read a
+   program's mind, but there is also no pre-exam file left to open.
 
 ## The one-map revision (who calls whom)
 
@@ -8752,3 +9425,4 @@ Dashboard (password) → SecurityVault.openLog / deleteLog
 3. Never invent an API or a number. "I would check the code to be exact" is a
    fine answer.
 4. If Sir corrects you: "Thank you Sir — we will note it as an improvement."
+
