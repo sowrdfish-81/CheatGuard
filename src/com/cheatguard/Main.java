@@ -925,6 +925,7 @@ public class Main {
             return;
         }
         replaceCard(CARD_DASHBOARD, new DashboardPanel(adminAuth, password, () -> showCard(CARD_HOME)));
+        showCard(CARD_DASHBOARD);
     }
 
     private void openSettings() {

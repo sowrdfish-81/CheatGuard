@@ -5328,6 +5328,39 @@ public class ProcessWhitelist {
         return processName != null && BROWSERS.contains(processName.toLowerCase(Locale.ROOT));
     }
 
+    /** Real names for the built-in default tools (an exe name like "a.exe" tells nothing). */
+    private static final java.util.Map<String, String> REAL_NAMES = java.util.Map.ofEntries(
+            java.util.Map.entry("a.exe", "Compiled program"),
+            java.util.Map.entry("as.exe", "Assembler"),
+            java.util.Map.entry("cc.exe", "C compiler"),
+            java.util.Map.entry("cpp.exe", "C preprocessor"),
+            java.util.Map.entry("c++.exe", "C++ compiler"),
+            java.util.Map.entry("gcc.exe", "GCC compiler"),
+            java.util.Map.entry("g++.exe", "G++ compiler"),
+            java.util.Map.entry("mingw32-gcc.exe", "MinGW GCC"),
+            java.util.Map.entry("mingw32-g++.exe", "MinGW G++"),
+            java.util.Map.entry("mingw32-make.exe", "MinGW Make"),
+            java.util.Map.entry("make.exe", "Make"),
+            java.util.Map.entry("cmake.exe", "CMake"),
+            java.util.Map.entry("gdb.exe", "Debugger (GDB)"),
+            java.util.Map.entry("ld.exe", "Linker"),
+            java.util.Map.entry("clion64.exe", "CLion"),
+            java.util.Map.entry("idea64.exe", "IntelliJ IDEA"),
+            java.util.Map.entry("devcpp.exe", "Dev-C++"),
+            java.util.Map.entry("subl.exe", "Sublime Text"),
+            java.util.Map.entry("code.exe", "Visual Studio Code"),
+            java.util.Map.entry("javac.exe", "Java compiler"),
+            java.util.Map.entry("javaw.exe", "Java (windowed)"),
+            java.util.Map.entry("py.exe", "Python launcher"),
+            java.util.Map.entry("pythonw.exe", "Python (windowed)"),
+            java.util.Map.entry("wt.exe", "Windows Terminal"),
+            java.util.Map.entry("windowsterminal.exe", "Windows Terminal"),
+            java.util.Map.entry("cmd.exe", "Command Prompt"),
+            java.util.Map.entry("openconsole.exe", "Terminal"),
+            java.util.Map.entry("node.exe", "Node.js"),
+            java.util.Map.entry("git.exe", "Git"),
+            java.util.Map.entry("bash.exe", "Bash shell"));
+
     /** "code.exe" becomes "Visual Studio Code" (stored real name) or "Code". */
     public static String friendlyName(String processName) {
         if (processName == null || processName.isBlank()) return "Unknown app";
@@ -5341,6 +5374,8 @@ public class ProcessWhitelist {
             } catch (Exception ignored) {
                 // config unavailable (tests, early boot): fall through to the exe name
             }
+            String builtin = REAL_NAMES.get(lower);
+            if (builtin != null) return builtin;
         }
         if (lower.endsWith(".exe")) n = n.substring(0, n.length() - 4);
         n = n.replace('_', ' ').replace('-', ' ').trim();
@@ -7228,12 +7263,17 @@ Read the order — it is the lesson:
 
 ```java
     private void openDashboard() {
+        // ONE password check at the door: the dashboard keeps the verified password
+        // in memory, so opening and deleting sessions never asks again.
         char[] password = promptAdminPassword("Open session dashboard");
         if (password == null) return;
-        if (verifyOrExplain(password)) {
-            replaceCard(CARD_DASHBOARD, new DashboardPanel(adminAuth, () -> showCard(CARD_HOME)));
-            showCard(CARD_DASHBOARD);
+        AdminCredentialStore.Result r = adminAuth.check(password.clone());
+        if (!r.success()) {
+            explainVerificationFailure(r);
+            return;
         }
+        replaceCard(CARD_DASHBOARD, new DashboardPanel(adminAuth, password, () -> showCard(CARD_HOME)));
+        showCard(CARD_DASHBOARD);
     }
 
     private void openSettings() {
@@ -8185,6 +8225,7 @@ import com.cheatguard.security.AdminAuth;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -8249,26 +8290,37 @@ public class SettingsPanel extends JPanel {
             return label;
         });
 
-        // search bar: type a few letters, matching INSTALLED apps appear by their
-        // real names; picking one adds the exe it points to.
-        JTextField search = UITheme.field("Search installed apps...");
+        // search bar: type keywords ("vs code", "python", "clion") and matching
+        // INSTALLED apps appear by their real names; picking one adds the exe it
+        // points to. The suggestion list stays HIDDEN until something is typed.
+        JTextField search = UITheme.field("Search installed apps...  (e.g. vs code)");
         DefaultListModel<String> matchModel = new DefaultListModel<>();
         JList<String> matches = new JList<>(matchModel);
         UITheme.styleList(matches);
         matches.setVisibleRowCount(6);
         List<com.cheatguard.config.InstalledApps.App> installed =
                 com.cheatguard.config.InstalledApps.list();
+        List<com.cheatguard.config.InstalledApps.App> shown = new ArrayList<>();
+        JScrollPane matchScroll = UITheme.scroll(matches);
+        matchScroll.setAlignmentX(LEFT_ALIGNMENT);
+        matchScroll.setPreferredSize(new Dimension(300, 120));
+        matchScroll.setVisible(false);
         Runnable refill = () -> {
             String q = search.getText().trim().toLowerCase();
+            shown.clear();
             matchModel.clear();
-            for (com.cheatguard.config.InstalledApps.App app : installed) {
-                if (q.isEmpty()
-                        || app.displayName().toLowerCase().contains(q)) {
-                    matchModel.addElement(app.displayName() + "  \u2192  " + app.lnkPath());
+            if (!q.isEmpty()) {
+                for (com.cheatguard.config.InstalledApps.App app : installed) {
+                    if (matchesKeywords(app, q)) {
+                        shown.add(app);
+                        matchModel.addElement(app.displayName());
+                    }
                 }
             }
+            boolean show = !q.isEmpty();
+            matchScroll.setVisible(show);
+            search.getParent().revalidate();
         };
-        refill.run();
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
             @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
@@ -8277,10 +8329,10 @@ public class SettingsPanel extends JPanel {
 
         JButton add = UITheme.secondary("Add selected");
         add.addActionListener(e -> {
-            String chosen = matches.getSelectedValue();
-            if (chosen == null) return;
-            String lnkPath = chosen.substring(chosen.indexOf("  \u2192  ") + 5).trim();
-            String target = com.cheatguard.config.InstalledApps.resolveTarget(lnkPath);
+            int idx = matches.getSelectedIndex();
+            if (idx < 0 || idx >= shown.size()) return;
+            com.cheatguard.config.InstalledApps.App app = shown.get(idx);
+            String target = com.cheatguard.config.InstalledApps.resolveTarget(app.lnkPath());
             if (target == null || target.isBlank()
                     || !target.toLowerCase().endsWith(".exe")) {
                 JOptionPane.showMessageDialog(this,
@@ -8288,11 +8340,12 @@ public class SettingsPanel extends JPanel {
                         JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            String exeName = new java.io.File(target).getName();
-            config.addAllowedProcessPath(new java.io.File(target));
-            config.setAppDisplayName(exeName, chosen.substring(0, chosen.indexOf("  \u2192  ")).trim());
+            java.io.File exe = new java.io.File(target);
+            config.addAllowedProcessPath(exe);
+            config.setAppDisplayName(exe.getName(), app.displayName());
             refresh(processModel, config.getAllowedProcesses());
             search.setText("");
+            search.requestFocusInWindow();
         });
 
         JButton browse = UITheme.ghost("Choose .exe");
@@ -8317,7 +8370,7 @@ public class SettingsPanel extends JPanel {
 
         return appCard("Allowed applications",
                 "Add apps by searching their real names - anything else a student opens is closed automatically. Use \"Choose .exe\" for a portable program.",
-                list, search, matchModel, matches, add, browse, remove);
+                list, search, matchScroll, add, browse, remove);
     }
 
     /** Read an exe's real name from its version information (best effort). */
@@ -8343,20 +8396,50 @@ public class SettingsPanel extends JPanel {
         return real != null ? real : com.cheatguard.watchdog.ProcessWhitelist.friendlyName(exeName);
     }
 
+    /**
+     * Keyword search: EVERY word must match. A word matches when it appears in
+     * the app's name or shortcut name, or when it is an abbreviation made of the
+     * name's word initials - so "vs code" finds Visual Studio Code.
+     */
+    private boolean matchesKeywords(com.cheatguard.config.InstalledApps.App app, String query) {
+        for (String word : query.split("\\s+")) {
+            if (word.isEmpty()) continue;
+            if (!wordMatches(app, word)) return false;
+        }
+        return true;
+    }
+
+    private boolean wordMatches(com.cheatguard.config.InstalledApps.App app, String word) {
+        String base = new java.io.File(app.lnkPath()).getName();
+        if (base.toLowerCase().endsWith(".lnk")) {
+            base = base.substring(0, base.length() - 4);
+        }
+        String hay = (app.displayName() + " " + base).toLowerCase();
+        if (hay.contains(word)) return true;
+        // initialism: "vs" -> the first letters of the name's words, in order
+        StringBuilder initials = new StringBuilder();
+        for (String w : hay.split(" ")) {
+            if (!w.isEmpty()) initials.append(w.charAt(0));
+        }
+        int at = 0;
+        for (char c : word.toCharArray()) {
+            at = initials.indexOf(String.valueOf(c), at);
+            if (at < 0) return false;
+            at++;
+        }
+        return true;
+    }
+
     /** The applications card: heading, hint, allowed list, search picker, actions. */
     private JComponent appCard(String heading, String hintText, JList<String> list,
-                               JTextField search, DefaultListModel<String> matchModel,
-                               JList<String> matches, JButton add, JButton extra, JButton remove) {
+                               JTextField search, JScrollPane matchScroll, JButton add,
+                               JButton extra, JButton remove) {
         JPanel card = UITheme.card();
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
 
         JScrollPane scroll = UITheme.scroll(list);
         scroll.setAlignmentX(LEFT_ALIGNMENT);
         scroll.setPreferredSize(new Dimension(300, 220));
-
-        JScrollPane matchScroll = UITheme.scroll(matches);
-        matchScroll.setAlignmentX(LEFT_ALIGNMENT);
-        matchScroll.setPreferredSize(new Dimension(300, 130));
 
         search.setMaximumSize(new Dimension(460, 40));
 
