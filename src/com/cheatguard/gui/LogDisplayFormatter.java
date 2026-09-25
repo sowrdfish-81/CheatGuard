@@ -83,6 +83,10 @@ public final class LogDisplayFormatter {
             case "ALLOWED_APP_OUTSIDE_FOLDER_SHOWN":
                 return "Allowed app is showing content outside the exam folder: "
                         + orDefault(d, "an app");
+            case "FILE_LOCK_ENABLED":
+                return "File walls up: the student's account cannot open files outside the exam folder";
+            case "FILE_LOCK_SKIPPED":
+                return "File walls could not be applied; process and folder alerts stay active";
 
             case "BLOCKED_INTERNET_DOMAIN":
                 return "Website blocked: " + orDefault(d, "unknown site");

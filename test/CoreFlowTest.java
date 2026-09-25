@@ -49,6 +49,7 @@ public class CoreFlowTest {
         checkTitlePathRule();
         checkEditorTitleRule();
         checkRuntimeArgRule();
+        checkLockPathCollection();
 
         System.out.println();
         if (failures == 0) {
@@ -385,6 +386,44 @@ public class CoreFlowTest {
                 WatchdogEngine.runtimeArgOutside(new String[]{"-m", "jedi"}, exam) == null);
         expect("no arguments is clean",
                 WatchdogEngine.runtimeArgOutside(null, exam) == null);
+    }
+
+    private static void checkLockPathCollection() throws Exception {
+        section("File-access lock path collection");
+        java.io.File base = new java.io.File(System.getProperty("java.io.tmpdir"),
+                "cgt-" + System.nanoTime());
+        java.io.File profile = new java.io.File(base, "profile");
+        java.io.File documents = new java.io.File(profile, "Documents");
+        java.io.File downloads = new java.io.File(profile, "Downloads");
+        java.io.File desktop = new java.io.File(base, "Desktop");
+        java.io.File exam = new java.io.File(desktop, "Exam_1");
+        java.io.File cheat = new java.io.File(desktop, "CheatNotes");
+        java.io.File lnk = new java.io.File(desktop, "shortcut.lnk");
+        java.io.File note = new java.io.File(desktop, "note.txt");
+        java.io.File root = new java.io.File(base, "Ddrive");
+        for (java.io.File f : new java.io.File[]{documents, downloads, desktop, exam, cheat, root}) {
+            f.mkdirs();
+        }
+        lnk.createNewFile();
+        note.createNewFile();
+        java.util.List<java.io.File> roots = java.util.Arrays.asList(root,
+                new java.io.File(base, "Missing"));
+        java.util.List<String> paths = com.cheatguard.watchdog.StrictNetworkLockdown
+                .collectLockPaths(profile, desktop, exam, roots);
+        expect("profile content folders are locked",
+                paths.contains(documents.getAbsolutePath())
+                        && paths.contains(downloads.getAbsolutePath()));
+        expect("foreign desktop folder is locked", paths.contains(cheat.getAbsolutePath()));
+        expect("exam folder is never locked", !paths.contains(exam.getAbsolutePath()));
+        expect("shortcuts are never locked", !paths.contains(lnk.getAbsolutePath()));
+        expect("loose desktop files are locked", paths.contains(note.getAbsolutePath()));
+        expect("extra drive roots are locked and missing roots skipped",
+                paths.contains(root.getAbsolutePath())
+                        && !paths.contains(new java.io.File(base, "Missing").getAbsolutePath()));
+        for (java.io.File f : new java.io.File[]{documents, downloads, exam, cheat, root,
+                desktop, profile, base}) {
+            f.delete();
+        }
     }
 
     private static final String CRLF = new String(new char[]{'\r', '\n'});

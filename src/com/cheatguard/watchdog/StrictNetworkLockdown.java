@@ -39,12 +39,21 @@ public final class StrictNetworkLockdown implements Closeable {
     private final File state = new File(networkDir, "firewall_state.json");
     private final File allowedIps = new File(networkDir, "allowed-ips.txt");
     private final File egressStatus = new File(networkDir, "egress-status.txt");
+    private final File lockPathsFile = new File(networkDir, "lock-paths.txt");
+    private final File lockStatusFile = new File(networkDir, "lock-status.txt");
+    /** The student's exam folder - the ONLY folder that stays readable. */
+    private volatile File examFolder;
     private volatile boolean active;
     private volatile String lastError = "";
 
     public StrictNetworkLockdown(LogManager logManager, ViolationListener listener) {
         this.logManager = logManager;
         this.listener = listener;
+    }
+
+    /** Give the lockdown the student's exam folder - the only readable folder. */
+    public void setExamFolder(File folder) {
+        if (folder != null && folder.isDirectory()) this.examFolder = folder;
     }
 
     public boolean start() {
@@ -62,6 +71,7 @@ public final class StrictNetworkLockdown implements Closeable {
             if (sid.isEmpty()) throw new IOException("Could not identify the signed-in Windows user SID.");
             if (program.isEmpty()) throw new IOException("Could not identify the Cheat.Guard executable path.");
             seedAllowedIps();
+            writeLockPaths();
             writeConfig(sid, program);
             launchElevated(false);
             long end = System.currentTimeMillis() + 90000L;
@@ -70,6 +80,7 @@ public final class StrictNetworkLockdown implements Closeable {
                     active = true;
                     emitInfo("STRICT_NETWORK_LOCK_ENABLED", "Website allowlist active: only admin-approved domains can be reached during this exam.");
                     emitEgressStatus();
+                    emitLockStatus();
                     return true;
                 }
                 if (error.exists()) throw new IOException(readQuietly(error));
@@ -269,6 +280,9 @@ public final class StrictNetworkLockdown implements Closeable {
                 "\"allowedIpFile\":\"" + jsonEscape(allowedIps.getAbsolutePath()) + "\",\n" +
                 "\"egressStatusFile\":\"" + jsonEscape(egressStatus.getAbsolutePath()) + "\",\n" +
                 "\"verifyHost\":\"" + jsonEscape(verifyHost) + "\",\n" +
+                "\"lockPathsFile\":\"" + jsonEscape(lockPathsFile.getAbsolutePath()) + "\",\n" +
+                "\"lockStatusFile\":\"" + jsonEscape(lockStatusFile.getAbsolutePath()) + "\",\n" +
+                "\"userSidForLocks\":\"" + jsonEscape(sid) + "\",\n" +
                 "\"stateFile\":\"" + jsonEscape(state.getAbsolutePath()) + "\",\n" +
                 "\"readyFile\":\"" + jsonEscape(ready.getAbsolutePath()) + "\",\n" +
                 "\"stopFile\":\"" + jsonEscape(stop.getAbsolutePath()) + "\",\n" +
@@ -324,6 +338,111 @@ public final class StrictNetworkLockdown implements Closeable {
         } else {
             emitInfo("EGRESS_FIREWALL_FALLBACK",
                     "Egress firewall could not be verified on this network; DNS-level website blocking is active.");
+        }
+    }
+
+    /** Report whether the student's file-access locks applied. */
+    private void emitLockStatus() {
+        String status = "";
+        try {
+            if (lockStatusFile.isFile()) {
+                status = Files.readString(lockStatusFile.toPath(), StandardCharsets.UTF_8).trim();
+            }
+        } catch (Exception ignored) {
+        }
+        if ("ACTIVE".equalsIgnoreCase(status)) {
+            emitInfo("FILE_LOCK_ENABLED",
+                    "File walls up: the student's account cannot open files outside the exam folder "
+                            + "(Documents, Downloads, other drives, USB).");
+        } else {
+            emitInfo("FILE_LOCK_SKIPPED",
+                    "Pre-exam file blocking could not be applied; process and folder alerts stay active.");
+        }
+    }
+
+    /**
+     * Build the list of folders the student's account is locked out of for the
+     * exam: the profile's content folders, everything on the Desktop except the
+     * exam folder and shortcuts, and every drive that holds neither Windows, the
+     * profile, ProgramData nor an approved app.
+     */
+    private List<String> buildLockPaths() {
+        File profile = com.cheatguard.config.AppPaths.getUserProfileDirectory();
+        File desktop = com.cheatguard.config.AppPaths.getDesktopDirectory();
+        Set<String> keepDrives = new java.util.HashSet<>();
+        addDriveOf(keepDrives, new File(System.getenv("SystemRoot") == null ? "C:\\" : System.getenv("SystemRoot")));
+        addDriveOf(keepDrives, profile);
+        addDriveOf(keepDrives, examFolder);
+        addDriveOf(keepDrives, com.cheatguard.config.AppPaths.getDataDirectory());
+        for (String allowed : com.cheatguard.config.AppConfig.getInstance().getAllowedProcesses()) {
+            addDriveOf(keepDrives, new File(com.cheatguard.config.AppConfig.getInstance()
+                    .getProcessPath(allowed) == null ? "C:\\" : com.cheatguard.config.AppConfig
+                    .getInstance().getProcessPath(allowed)));
+        }
+        List<File> extraRoots = new ArrayList<>();
+        for (File root : File.listRoots()) {
+            if (!keepDrives.contains(root.getAbsolutePath().toLowerCase(java.util.Locale.ROOT))) {
+                extraRoots.add(root);
+            }
+        }
+        return collectLockPaths(profile, desktop, examFolder, extraRoots);
+    }
+
+    /** Drives that must stay untouched: add the drive letter of the given path. */
+    private static void addDriveOf(Set<String> keep, File f) {
+        if (f == null) return;
+        String p = f.getAbsolutePath().toLowerCase(java.util.Locale.ROOT);
+        if (p.length() >= 3 && p.charAt(1) == ':') keep.add(p.substring(0, 3));
+    }
+
+    /**
+     * Pure path collection (testable): profile content folders, desktop children
+     * except the exam folder and shortcuts, plus the given extra drive roots.
+     */
+    public static List<String> collectLockPaths(File profile, File desktop, File examFolder,
+                                                List<File> extraRoots) {
+        List<String> out = new ArrayList<>();
+        if (profile != null && profile.isDirectory()) {
+            for (String name : new String[]{"Documents", "Downloads", "Music", "Pictures",
+                    "Videos", "Saved Games", "Contacts", "Links", "OneDrive", "3D Objects",
+                    "Searches"}) {
+                File f = new File(profile, name);
+                if (f.isDirectory()) out.add(f.getAbsolutePath());
+            }
+        }
+        if (desktop != null && desktop.isDirectory()) {
+            File[] kids = desktop.listFiles();
+            if (kids != null) {
+                for (File kid : kids) {
+                    if (examFolder != null && sameTarget(kid, examFolder)) continue;
+                    if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
+                    out.add(kid.getAbsolutePath());
+                }
+            }
+        }
+        if (extraRoots != null) {
+            for (File root : extraRoots) {
+                if (root.exists()) out.add(root.getAbsolutePath());
+            }
+        }
+        return out;
+    }
+
+    private static boolean sameTarget(File a, File b) {
+        try {
+            return a.getCanonicalPath().equalsIgnoreCase(b.getCanonicalPath());
+        } catch (Exception e) {
+            return a.getAbsolutePath().equalsIgnoreCase(b.getAbsolutePath());
+        }
+    }
+
+    /** Write the lock list so the elevated helper can apply the denies. */
+    private void writeLockPaths() {
+        List<String> paths = buildLockPaths();
+        try {
+            Files.writeString(lockPathsFile.toPath(), String.join("\n", paths) + "\n",
+                    StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
         }
     }
 

@@ -62,6 +62,11 @@ public final class AppPaths {
         return userHome == null ? null : new File(userHome);
     }
 
+    /** The signed-in (interactive) user's profile folder, for file-access locks. */
+    public static File getUserProfileDirectory() {
+        return interactiveProfileDirectory();
+    }
+
     /** Root for all machine-wide app data. */
     public static File getDataDirectory() {
         String override = System.getProperty("cheatguard.data.dir");

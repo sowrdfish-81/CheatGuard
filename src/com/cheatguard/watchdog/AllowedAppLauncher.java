@@ -47,6 +47,19 @@ public final class AllowedAppLauncher {
         }
 
         try {
+            // Packaged runs are elevated: launching directly would start the app as
+            // ADMIN, which would bypass the student's file-access locks. Handing the
+            // launch to Explorer starts it in the STUDENT's session instead. A
+            // temporary shortcut carries the exam-folder argument and working dir.
+            boolean elevatedRun = new File(
+                    System.getProperty("jpackage.app-path", "")).isFile();
+            if (elevatedRun) {
+                File lnk = createStudentShortcut(executable, examFolder, name);
+                if (lnk != null) {
+                    new ProcessBuilder("explorer.exe", lnk.getAbsolutePath()).start();
+                    return null;
+                }
+            }
             ProcessBuilder pb = FOLDER_AWARE.contains(name)
                     ? new ProcessBuilder(executable.getAbsolutePath(), examFolder.getAbsolutePath())
                     : new ProcessBuilder(executable.getAbsolutePath());
@@ -58,6 +71,33 @@ public final class AllowedAppLauncher {
             return null;
         } catch (Exception e) {
             return "Could not start " + ProcessWhitelist.friendlyName(name) + ": " + e.getMessage();
+        }
+    }
+
+    /**
+     * Build a one-click shortcut in the exam folder that starts the approved app
+     * with the exam folder as argument and working directory. The shortcut also
+     * stays behind as a student-friendly launcher for the rest of the session.
+     */
+    private static File createStudentShortcut(File exe, File examFolder, String name) {
+        try {
+            File lnk = new File(examFolder, "Launch " + ProcessWhitelist.friendlyName(name) + ".lnk");
+            String ps = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"
+                    + lnk.getAbsolutePath().replace("'", "''") + "');"
+                    + "$s.TargetPath='" + exe.getAbsolutePath().replace("'", "''") + "';"
+                    + (FOLDER_AWARE.contains(name)
+                        ? "$s.Arguments='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
+                        : "")
+                    + "$s.WorkingDirectory='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
+                    + "$s.Save()";
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-WindowStyle", "Hidden", "-Command", ps)
+                    .redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            return lnk.isFile() ? lnk : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 

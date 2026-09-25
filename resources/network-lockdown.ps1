@@ -15,6 +15,8 @@ $protectDoneFile = $cfg.protectDoneFile
 $allowedIpFile = [string]$cfg.allowedIpFile
 $egressStatusFile = [string]$cfg.egressStatusFile
 $verifyHost = [string]$cfg.verifyHost
+$lockPathsFile = [string]$cfg.lockPathsFile
+$lockStatusFile = [string]$cfg.lockStatusFile
 $fusKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $groupName = 'Cheat.Guard Strict Exam'
 $proxyKey = "Registry::HKEY_USERS\$($cfg.userSid)\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
@@ -305,6 +307,33 @@ function Remove-OurRules {
     Get-NetFirewallRule -PolicyStore PersistentStore -Group $groupName -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 }
 
+# File walls: the student's own account is DENIED read/execute/delete on every
+# folder the Java side listed (profile content folders, desktop items other than
+# the exam folder, other drives, USB). This works at the NTFS layer, so EVERY
+# program running as the student - VS Code's terminal, Explorer, anything - hits
+# "Access denied" outside the exam folder. Denies are per-SID and inherit down.
+function Set-FileAccessLocks([string]$ListFile, [string]$Sid) {
+    $locked = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($ListFile) -or [string]::IsNullOrWhiteSpace($Sid)) { return $locked }
+    if (-not (Test-Path -LiteralPath $ListFile)) { return $locked }
+    foreach ($line in @(Get-Content -LiteralPath $ListFile -ErrorAction SilentlyContinue)) {
+        $p = $line.Trim()
+        if (-not $p -or -not (Test-Path -LiteralPath $p)) { continue }
+        try {
+            icacls "$p" /deny "*$($Sid):(OI)(CI)(RX,D)" | Out-Null
+            $locked.Add($p)
+        } catch {}
+    }
+    return $locked
+}
+
+function Restore-FileAccess([string[]]$Paths, [string]$Sid) {
+    foreach ($p in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        try { icacls "$p" /remove:d "*$Sid" | Out-Null } catch {}
+    }
+}
+
 # VPN concentrators and remote-desktop relays speak on fixed ports that no exam
 # traffic uses. Additive Block rules, the same safe pattern as the DoT rules;
 # they also cover hand-rolled tunnelling tools the process sweep cannot name.
@@ -463,7 +492,9 @@ function Restore-All {
     Restore-Dns $state.Dns
     Restore-Doh $state.Doh
     Restore-Fus $state.Fus
+    Restore-FileAccess $state.FileLocks $cfg.userSid
     Remove-Item -LiteralPath $egressStatusFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $lockStatusFile -Force -ErrorAction SilentlyContinue
 
     Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
 }
@@ -501,6 +532,7 @@ try {
         Dns = Get-DnsState
         Doh = Get-DohState
         Fus = Get-FusState
+        FileLocks = @()
     }
     $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
 
@@ -576,6 +608,18 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($egressStatusFile)) {
         if ($script:egressActive) { 'ACTIVE' | Set-Content -LiteralPath $egressStatusFile -Encoding ASCII }
         else { 'FALLBACK' | Set-Content -LiteralPath $egressStatusFile -Encoding ASCII }
+    }
+
+    # ---- file walls: deny the student's account everything outside the exam folder ----
+    $script:fileLocks = @()
+    if ((-not [string]::IsNullOrWhiteSpace($lockPathsFile)) -and (Test-Path -LiteralPath $lockPathsFile)) {
+        try { $script:fileLocks = @(Set-FileAccessLocks $lockPathsFile $cfg.userSid) } catch { $script:fileLocks = @() }
+    }
+    $state.FileLocks = @($script:fileLocks)
+    $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
+    if (-not [string]::IsNullOrWhiteSpace($lockStatusFile)) {
+        if ($script:fileLocks.Count -ge 1) { 'ACTIVE' | Set-Content -LiteralPath $lockStatusFile -Encoding ASCII }
+        else { 'SKIPPED' | Set-Content -LiteralPath $lockStatusFile -Encoding ASCII }
     }
 
     # Force browsers onto the system resolver, then point the system resolver at the

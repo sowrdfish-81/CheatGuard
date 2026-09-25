@@ -449,6 +449,7 @@ public class Main {
         // interface thread so the window keeps painting.
         Thread starter = new Thread(() -> {
             StrictNetworkLockdown lockdown = new StrictNetworkLockdown(session.getLogManager(), liveListener);
+            lockdown.setExamFolder(session.getExamFolder());
             boolean ok = false;
             try {
                 logSessionContext(session, liveListener);
