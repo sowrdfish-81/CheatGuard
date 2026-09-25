@@ -62,10 +62,50 @@ public final class UITheme {
 
     public static void installLookAndFeel() {
         try {
-            UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+            // A full dark Metal theme: this is what makes JOptionPane buttons, file
+            // choosers and every LAF-painted control match the app instead of showing
+            // the stock light-grey Metal look. The focus colour is deliberately the
+            // same as the control background so the focus rectangle never pops as a
+            // box over the dark buttons.
+            javax.swing.plaf.metal.MetalLookAndFeel.setCurrentTheme(
+                    new javax.swing.plaf.metal.DefaultMetalTheme() {
+                        @Override public String getName() { return "Cheat.Guard Dark"; }
+                        @Override public javax.swing.plaf.ColorUIResource getControl() { return new javax.swing.plaf.ColorUIResource(BG_ELEVATED); }
+                        @Override public javax.swing.plaf.ColorUIResource getControlDarkShadow() { return new javax.swing.plaf.ColorUIResource(0x0B0D10); }
+                        @Override public javax.swing.plaf.ColorUIResource getControlShadow() { return new javax.swing.plaf.ColorUIResource(BORDER); }
+                        @Override public javax.swing.plaf.ColorUIResource getControlHighlight() { return new javax.swing.plaf.ColorUIResource(0x2A313D); }
+                        @Override public javax.swing.plaf.ColorUIResource getControlInfo() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getControlTextColor() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getFocusColor() { return new javax.swing.plaf.ColorUIResource(BG_ELEVATED); }
+                        @Override public javax.swing.plaf.ColorUIResource getPrimaryControl() { return new javax.swing.plaf.ColorUIResource(ACCENT_RED); }
+                        @Override public javax.swing.plaf.ColorUIResource getPrimaryControlHighlight() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getPrimaryControlDarkShadow() { return new javax.swing.plaf.ColorUIResource(ACCENT_RED_PRESS); }
+                        @Override public javax.swing.plaf.ColorUIResource getPrimaryControlShadow() { return new javax.swing.plaf.ColorUIResource(ACCENT_RED_DARK); }
+                        @Override public javax.swing.plaf.ColorUIResource getPrimaryControlInfo() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getWindowBackground() { return new javax.swing.plaf.ColorUIResource(BG_PANEL); }
+                        @Override public javax.swing.plaf.ColorUIResource getWindowTitleBackground() { return new javax.swing.plaf.ColorUIResource(BG_DARK); }
+                        @Override public javax.swing.plaf.ColorUIResource getWindowTitleForeground() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getWindowTitleInactiveBackground() { return new javax.swing.plaf.ColorUIResource(BG_DARK); }
+                        @Override public javax.swing.plaf.ColorUIResource getWindowTitleInactiveForeground() { return new javax.swing.plaf.ColorUIResource(TEXT_DIM); }
+                        @Override public javax.swing.plaf.ColorUIResource getMenuBackground() { return new javax.swing.plaf.ColorUIResource(BG_PANEL); }
+                        @Override public javax.swing.plaf.ColorUIResource getMenuForeground() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getMenuSelectedBackground() { return new javax.swing.plaf.ColorUIResource(BG_ELEVATED); }
+                        @Override public javax.swing.plaf.ColorUIResource getMenuSelectedForeground() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getSeparatorBackground() { return new javax.swing.plaf.ColorUIResource(BG_DARK); }
+                        @Override public javax.swing.plaf.ColorUIResource getSystemTextColor() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getUserTextColor() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getInactiveSystemTextColor() { return new javax.swing.plaf.ColorUIResource(TEXT_DIM); }
+                        @Override public javax.swing.plaf.ColorUIResource getTextHighlightColor() { return new javax.swing.plaf.ColorUIResource(new Color(46, 196, 160, 70)); }
+                        @Override public javax.swing.plaf.ColorUIResource getHighlightedTextColor() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                        @Override public javax.swing.plaf.ColorUIResource getAcceleratorForeground() { return new javax.swing.plaf.ColorUIResource(TEXT_WHITE); }
+                    });
+            UIManager.setLookAndFeel(new javax.swing.plaf.metal.MetalLookAndFeel());
         } catch (Exception ignored) {
             // stock default is acceptable; our components paint themselves anyway
         }
+        // every button in the app - including the ones dialogs create - becomes a
+        // dark rounded pill; buttons that paint themselves opt out via the marker
+        UIManager.put("ButtonUI", "com.cheatguard.gui.RoundedButtonUI");
         UIManager.put("ToolTip.background", BG_ELEVATED);
         UIManager.put("ToolTip.foreground", TEXT_WHITE);
         UIManager.put("OptionPane.background", BG_PANEL);
@@ -196,6 +236,7 @@ public final class UITheme {
         b.setRolloverEnabled(true);
         b.setFont(FONT_BODY);
         b.setForeground(fg);
+        b.putClientProperty("cheatguard.customPaint", Boolean.TRUE);
         b.setContentAreaFilled(false);
         b.setBorderPainted(false);
         b.setFocusPainted(false);

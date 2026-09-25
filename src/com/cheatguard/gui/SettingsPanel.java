@@ -86,6 +86,12 @@ public class SettingsPanel extends JPanel {
         matchScroll.setAlignmentX(LEFT_ALIGNMENT);
         matchScroll.setPreferredSize(new Dimension(300, 120));
         matchScroll.setVisible(false);
+
+        JButton clear = UITheme.ghost("Clear");
+        clear.addActionListener(e -> {
+            search.setText("");
+            search.requestFocusInWindow();
+        });
         Runnable refill = () -> {
             String q = search.getText().trim().toLowerCase();
             shown.clear();
@@ -151,7 +157,7 @@ public class SettingsPanel extends JPanel {
 
         return appCard("Allowed applications",
                 "Add apps by searching their real names - anything else a student opens is closed automatically. Use \"Choose .exe\" for a portable program.",
-                list, search, matchScroll, add, browse, remove);
+                list, search, matchScroll, add, browse, clear, remove);
     }
 
     /** Read an exe's real name from its version information (best effort). */
@@ -214,7 +220,7 @@ public class SettingsPanel extends JPanel {
     /** The applications card: heading, hint, allowed list, search picker, actions. */
     private JComponent appCard(String heading, String hintText, JList<String> list,
                                JTextField search, JScrollPane matchScroll, JButton add,
-                               JButton extra, JButton remove) {
+                               JButton extra, JButton clear, JButton remove) {
         JPanel card = UITheme.card();
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
 
@@ -228,7 +234,8 @@ public class SettingsPanel extends JPanel {
         actions.setOpaque(false);
         actions.setAlignmentX(LEFT_ALIGNMENT);
         actions.add(add);
-        actions.add(extra);
+        if (extra != null) actions.add(extra);
+        actions.add(clear);
         actions.add(remove);
 
         card.add(leftAlign(UITheme.row(0, UITheme.section(heading))));
