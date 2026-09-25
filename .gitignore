@@ -1,0 +1,11 @@
+# Build outputs
+bin/
+build/
+dist/
+testbin/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
