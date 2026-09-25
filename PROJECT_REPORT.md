@@ -2072,7 +2072,10 @@ public class WatchdogEngine implements Runnable {
             if (!browser && !approved && !forced && inSystemArea) continue;
 
             String app = ProcessWhitelist.friendlyName(name);
-            if (controller.terminate(ph.pid())) {
+            // taskkill can race an app that is already shutting down (VS Code runs as
+            // several processes) - the process being gone counts as closed.
+            boolean closed = controller.terminate(ph.pid()) || !ph.isAlive();
+            if (closed) {
                 emit(new Violation("APP_CLOSED_AT_START", app, Violation.Severity.INFO));
             } else {
                 emit(new Violation("UNAUTHORIZED_APP_CLOSE_FAILED", app, Violation.Severity.CRITICAL));
@@ -2197,7 +2200,7 @@ public class WatchdogEngine implements Runnable {
             }
             if (!browser && !forced && inSystemArea) continue; // machine area, not the student's doing
 
-            boolean closed = controller.terminate(ph.pid());
+            boolean closed = controller.terminate(ph.pid()) || !ph.isAlive();
             String app = ProcessWhitelist.friendlyName(name);
             emit(closed
                     ? new Violation("UNAUTHORIZED_BACKGROUND_APP_CLOSED", app, Violation.Severity.INFO)
@@ -2369,7 +2372,8 @@ public class WatchdogEngine implements Runnable {
             stillVisibleBlocked.add(proc.getPid());
             if (recentlyBlockedPids.contains(proc.getPid())) continue;
 
-            boolean closed = controller.terminate(proc.getPid());
+            boolean gone = ProcessHandle.of(proc.getPid()).map(ph -> !ph.isAlive()).orElse(true);
+            boolean closed = controller.terminate(proc.getPid()) || gone;
             String app = ProcessWhitelist.friendlyName(proc.getName());
 
             if (outsidePath != null) {
@@ -3141,6 +3145,10 @@ public final class StrictNetworkLockdown implements Closeable {
     private final File state = new File(networkDir, "firewall_state.json");
     private final File allowedIps = new File(networkDir, "allowed-ips.txt");
     private final File egressStatus = new File(networkDir, "egress-status.txt");
+    private final File lockPathsFile = new File(networkDir, "lock-paths.txt");
+    private final File lockStatusFile = new File(networkDir, "lock-status.txt");
+    /** The student's exam folder - the ONLY folder that stays readable. */
+    private volatile File examFolder;
     private volatile boolean active;
     private volatile String lastError = "";
 
@@ -3155,6 +3163,11 @@ public final class StrictNetworkLockdown implements Closeable {
     public StrictNetworkLockdown(LogManager logManager, ViolationListener listener) {
         this.logManager = logManager;
         this.listener = listener;
+    }
+
+    /** Give the lockdown the student's exam folder - the only readable folder. */
+    public void setExamFolder(File folder) {
+        if (folder != null && folder.isDirectory()) this.examFolder = folder;
     }
 
     public boolean start() {
@@ -3172,6 +3185,7 @@ public final class StrictNetworkLockdown implements Closeable {
             if (sid.isEmpty()) throw new IOException("Could not identify the signed-in Windows user SID.");
             if (program.isEmpty()) throw new IOException("Could not identify the Cheat.Guard executable path.");
             seedAllowedIps();
+            writeLockPaths();
             writeConfig(sid, program);
             launchElevated(false);
             long end = System.currentTimeMillis() + 90000L;
@@ -3180,6 +3194,7 @@ public final class StrictNetworkLockdown implements Closeable {
                     active = true;
                     emitInfo("STRICT_NETWORK_LOCK_ENABLED", "Website allowlist active: only admin-approved domains can be reached during this exam.");
                     emitEgressStatus();
+                    emitLockStatus();
                     return true;
                 }
                 if (error.exists()) throw new IOException(readQuietly(error));
@@ -3531,6 +3546,11 @@ public final class StrictNetworkLockdown implements Closeable {
     /**
      * Pure path collection (testable): profile content folders, desktop children
      * except the exam folder and shortcuts, plus the given extra drive roots.
+     *
+     * Ancestor safety: a folder that CONTAINS the exam folder (for example OneDrive
+     * when the Desktop is OneDrive-redirected) is never locked wholesale - denying
+     * it would inherit down onto the exam folder itself. Its OTHER children are
+     * locked instead, so only the exam chain stays open.
      */
     public static List<String> collectLockPaths(File profile, File desktop, File examFolder,
                                                 List<File> extraRoots) {
@@ -3540,25 +3560,67 @@ public final class StrictNetworkLockdown implements Closeable {
                     "Videos", "Saved Games", "Contacts", "Links", "OneDrive", "3D Objects",
                     "Searches"}) {
                 File f = new File(profile, name);
-                if (f.isDirectory()) out.add(f.getAbsolutePath());
-            }
-        }
-        if (desktop != null && desktop.isDirectory()) {
-            File[] kids = desktop.listFiles();
-            if (kids != null) {
-                for (File kid : kids) {
-                    if (examFolder != null && sameTarget(kid, examFolder)) continue;
-                    if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
-                    out.add(kid.getAbsolutePath());
+                if (!f.isDirectory()) continue;
+                if (isAncestorOrSelf(f, examFolder)) {
+                    lockChildrenExceptExam(f, examFolder, out, 0);
+                } else {
+                    out.add(f.getAbsolutePath());
                 }
             }
         }
+        if (desktop != null && desktop.isDirectory()) {
+            lockChildrenExceptExam(desktop, examFolder, out, 0);
+        }
         if (extraRoots != null) {
             for (File root : extraRoots) {
-                if (root.exists()) out.add(root.getAbsolutePath());
+                if (!root.exists()) continue;
+                if (isAncestorOrSelf(root, examFolder)) {
+                    lockChildrenExceptExam(root, examFolder, out, 0);
+                } else {
+                    out.add(root.getAbsolutePath());
+                }
             }
         }
         return out;
+    }
+
+    /** Deny a folder's children, but leave the chain to the exam folder open. */
+    private static void lockChildrenExceptExam(File folder, File examFolder,
+                                               List<String> out, int depth) {
+        if (folder == null || !folder.isDirectory() || depth > 4) return;
+        File[] kids = folder.listFiles();
+        if (kids == null) return;
+        for (File kid : kids) {
+            if (examFolder != null && sameTarget(kid, examFolder)) continue; // the exam folder itself
+            if (examFolder != null && isAncestor(kid, examFolder)) {         // on the exam chain
+                lockChildrenExceptExam(kid, examFolder, out, depth + 1);
+                continue;
+            }
+            if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
+            out.add(kid.getAbsolutePath());
+        }
+    }
+
+    private static boolean isAncestorOrSelf(File dir, File examFolder) {
+        return sameTarget(dir, examFolder) || isAncestor(dir, examFolder);
+    }
+
+    /** True when the exam folder lives INSIDE the given folder (strictly below it). */
+    private static boolean isAncestor(File dir, File examFolder) {
+        if (dir == null || examFolder == null) return false;
+        String d;
+        String e;
+        try {
+            d = dir.getCanonicalPath();
+            e = examFolder.getCanonicalPath();
+        } catch (Exception ex) {
+            d = dir.getAbsolutePath();
+            e = examFolder.getAbsolutePath();
+        }
+        d = d.toLowerCase(java.util.Locale.ROOT);
+        e = e.toLowerCase(java.util.Locale.ROOT);
+        if (!d.endsWith("\\")) d = d + "\\";
+        return e.startsWith(d);
     }
 
     private static boolean sameTarget(File a, File b) {
@@ -3663,53 +3725,6 @@ public final class StrictNetworkLockdown implements Closeable {
     private String currentUserSid() throws IOException, InterruptedException {
         Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value")
                 .redirectErrorStream(true).start();
-        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        p.waitFor();
-        return out;
-    }
-
-    /**
-     * Path granted unrestricted outbound access by the firewall helper.
-     *
-     * <p>Prefers the packaged launcher reported by jpackage. Falling back to
-     * {@link ProcessHandle} would return the JDK's {@code java.exe} when the app
-     * is started with {@code java -jar}, which would hand full Internet access to
-     * every Java program on the machine for the duration of the exam.
-     */
-    private String currentProgramPath() {
-        String packaged = System.getProperty("jpackage.app-path", "");
-        if (!packaged.isBlank() && new File(packaged).isFile()) return packaged;
-        try { return ProcessHandle.current().info().command().orElse(""); }
-        catch (Exception e) { return ""; }
-    }
-
-    private long currentPid() {
-        try { return ProcessHandle.current().pid(); }
-        catch (Exception e) {
-            try { return Long.parseLong(ManagementFactory.getRuntimeMXBean().getName().split("@")[0]); }
-            catch (Exception ignored) { return -1L; }
-        }
-    }
-
-    private String readQuietly(File f) {
-        try { return Files.readString(f.toPath()); } catch (Exception e) { return e.getMessage(); }
-    }
-
-    private String friendlyError(Exception e) {
-        String m = e.getMessage();
-        if (m == null || m.trim().isEmpty()) m = e.toString();
-        m = m.replace("\r", "").trim();
-        return m;
-    }
-
-    private String jsonEscape(String s) { return s.replace("\\", "\\\\").replace("\"", "\\\""); }
-    private static String psSingleQuote(String s) { return s.replace("'", "''"); }
-    private boolean isWindows() { return isWindowsStatic(); }
-    private static boolean isWindowsStatic() { return System.getProperty("os.name", "").toLowerCase().contains("win"); }
-
-    public boolean isActive() { return active; }
-    @Override public void close() { stopAndRestore(); }
-}
 ```
 
 - `currentProgramPath` prefers the jpackage launcher (falling back to the
@@ -6498,6 +6513,7 @@ Four buttons; dashboard and settings first verify the admin password.
 ### Chunk 8 — `startExam()`: the most important method
 
 ```java
+
     private void startExam(String course, String studentId) {
         if (sessionBusy) return;
         sessionBusy = true;
@@ -6513,16 +6529,24 @@ Four buttons; dashboard and settings first verify the admin password.
 
         JLabel alertPill = UITheme.pill("0 ALERTS", UITheme.TEXT_MUTED);
         JLabel blockedPill = UITheme.pill("0 BLOCKED", UITheme.TEXT_MUTED);
+        // Startup rows (closed apps, file-wall setup, one failed close inside the
+        // sweep...) are recorded in the sealed log but NOT shown or counted: the
+        // first 30 seconds are the machine settling down, not the student.
+        long[] pills = new long[2]; // red, blocked
         ViolationListener liveListener = violation -> SwingUtilities.invokeLater(() -> {
-            appendViolation(liveLog, violation);
             if (activeSession == null) return;
-            long red = activeSession.getLogManager().getRedFlagCount();
-            alertPill.setText(red + (red == 1 ? " ALERT" : " ALERTS"));
-            alertPill.setForeground(red > 0 ? UITheme.ACCENT_RED : UITheme.TEXT_MUTED);
-            long blocked = activeSession.getLogManager().getAllViolations().stream()
-                    .filter(v -> v.getSeverity() == Violation.Severity.NOTICE).count();
-            blockedPill.setText(blocked + " BLOCKED");
-            blockedPill.setForeground(blocked > 0 ? UITheme.WARN : UITheme.TEXT_MUTED);
+            if (hiddenDuringStartup(activeSession, violation)) return;
+            appendViolation(liveLog, violation);
+            if (violation.isRedFlag()) {
+                pills[0]++;
+                alertPill.setText(pills[0] + (pills[0] == 1 ? " ALERT" : " ALERTS"));
+                alertPill.setForeground(UITheme.ACCENT_RED);
+            }
+            if (violation.getSeverity() == Violation.Severity.NOTICE) {
+                pills[1]++;
+                blockedPill.setText(pills[1] + " BLOCKED");
+                blockedPill.setForeground(UITheme.WARN);
+            }
         });
 
         JOptionPane.showMessageDialog(frame,
@@ -6540,6 +6564,7 @@ Four buttons; dashboard and settings first verify the admin password.
         // interface thread so the window keeps painting.
         Thread starter = new Thread(() -> {
             StrictNetworkLockdown lockdown = new StrictNetworkLockdown(session.getLogManager(), liveListener);
+            lockdown.setExamFolder(session.getExamFolder());
             boolean ok = false;
             try {
                 logSessionContext(session, liveListener);

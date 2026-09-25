@@ -162,7 +162,10 @@ public class WatchdogEngine implements Runnable {
             if (!browser && !approved && !forced && inSystemArea) continue;
 
             String app = ProcessWhitelist.friendlyName(name);
-            if (controller.terminate(ph.pid())) {
+            // taskkill can race an app that is already shutting down (VS Code runs as
+            // several processes) - the process being gone counts as closed.
+            boolean closed = controller.terminate(ph.pid()) || !ph.isAlive();
+            if (closed) {
                 emit(new Violation("APP_CLOSED_AT_START", app, Violation.Severity.INFO));
             } else {
                 emit(new Violation("UNAUTHORIZED_APP_CLOSE_FAILED", app, Violation.Severity.CRITICAL));
@@ -263,7 +266,7 @@ public class WatchdogEngine implements Runnable {
             }
             if (!browser && !forced && inSystemArea) continue; // machine area, not the student's doing
 
-            boolean closed = controller.terminate(ph.pid());
+            boolean closed = controller.terminate(ph.pid()) || !ph.isAlive();
             String app = ProcessWhitelist.friendlyName(name);
             emit(closed
                     ? new Violation("UNAUTHORIZED_BACKGROUND_APP_CLOSED", app, Violation.Severity.INFO)
@@ -424,7 +427,8 @@ public class WatchdogEngine implements Runnable {
             stillVisibleBlocked.add(proc.getPid());
             if (recentlyBlockedPids.contains(proc.getPid())) continue;
 
-            boolean closed = controller.terminate(proc.getPid());
+            boolean gone = ProcessHandle.of(proc.getPid()).map(ph -> !ph.isAlive()).orElse(true);
+            boolean closed = controller.terminate(proc.getPid()) || gone;
             String app = ProcessWhitelist.friendlyName(proc.getName());
 
             if (outsidePath != null) {

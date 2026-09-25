@@ -20,9 +20,19 @@ real time, and seals an undeletable audit log for every session.
   components are never touched.
 - **Allowed apps stay inside the exam folder** — their window titles are
   watched: an allowed app showing a file outside the exam folder is closed and
-  logged as a red alert. The Windows recent-files lists (Start menu, jump
-  lists, Open-dialog recents) are wiped at session start, so nothing pre-exam
-  can be reopened in one click.
+  logged as a red alert. Editor tab titles must carry the exam folder's name
+  (a foreign folder is a red alert), and permitted interpreters (python) whose
+  command line names a file outside the exam folder are closed. Allowed apps
+  also launch in the STUDENT's session (via an Explorer broker), so the file
+  walls below apply to them too. The Windows recent-files lists (Start menu,
+  jump lists, Open-dialog recents) are wiped at session start, so nothing
+  pre-exam can be reopened in one click.
+- **File walls** — the strongest content protection: during a session the
+  student's account is DENIED read access (NTFS ACLs) to Documents, Downloads,
+  Music, Pictures, Videos, every Desktop item except the exam folder, and every
+  drive that holds neither Windows, the profile nor an approved app. Terminal,
+  editor, anything — opening a pre-exam file anywhere else returns
+  "Access denied". Everything is restored when the session ends.
 - **Readable log — three levels** — `OK` (grey) = routine enforcement such as an app
   closed at start; `WARN` (yellow) = a website the student tried to open but the block
   held; `ALERT` (red) = something actually got through: an unapproved folder, a USB
@@ -124,8 +134,8 @@ with the *local administrator password* can delete the credential store (the app
 detects tampering and forces a visible reset, but a local admin is above client-side
 enforcement); and a cheat file kept entirely inside an app that never shows a path in
 its title bar (for example a note typed into an editor with no file name) is invisible
-to title monitoring — the fresh-start rule, the recent-list wipe and the folder
-monitor close the practical routes, but they cannot read a program's mind.
+to title monitoring — but the file walls close the practical routes: there is no
+pre-exam file left that any app could open.
 
 Round-2 hardening (2.2):
 - **Proxy/PAC lockdown** — any user-configured HTTP proxy or PAC URL force-disables

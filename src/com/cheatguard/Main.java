@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -422,16 +423,24 @@ public class Main {
 
         JLabel alertPill = UITheme.pill("0 ALERTS", UITheme.TEXT_MUTED);
         JLabel blockedPill = UITheme.pill("0 BLOCKED", UITheme.TEXT_MUTED);
+        // Startup rows (closed apps, file-wall setup, one failed close inside the
+        // sweep...) are recorded in the sealed log but NOT shown or counted: the
+        // first 30 seconds are the machine settling down, not the student.
+        long[] pills = new long[2]; // red, blocked
         ViolationListener liveListener = violation -> SwingUtilities.invokeLater(() -> {
-            appendViolation(liveLog, violation);
             if (activeSession == null) return;
-            long red = activeSession.getLogManager().getRedFlagCount();
-            alertPill.setText(red + (red == 1 ? " ALERT" : " ALERTS"));
-            alertPill.setForeground(red > 0 ? UITheme.ACCENT_RED : UITheme.TEXT_MUTED);
-            long blocked = activeSession.getLogManager().getAllViolations().stream()
-                    .filter(v -> v.getSeverity() == Violation.Severity.NOTICE).count();
-            blockedPill.setText(blocked + " BLOCKED");
-            blockedPill.setForeground(blocked > 0 ? UITheme.WARN : UITheme.TEXT_MUTED);
+            if (hiddenDuringStartup(activeSession, violation)) return;
+            appendViolation(liveLog, violation);
+            if (violation.isRedFlag()) {
+                pills[0]++;
+                alertPill.setText(pills[0] + (pills[0] == 1 ? " ALERT" : " ALERTS"));
+                alertPill.setForeground(UITheme.ACCENT_RED);
+            }
+            if (violation.getSeverity() == Violation.Severity.NOTICE) {
+                pills[1]++;
+                blockedPill.setText(pills[1] + " BLOCKED");
+                blockedPill.setForeground(UITheme.WARN);
+            }
         });
 
         JOptionPane.showMessageDialog(frame,
@@ -520,6 +529,21 @@ public class Main {
         } catch (Exception e) {
             return 1;
         }
+    }
+
+    /** Status rows that are always worth showing, even in the startup window. */
+    private static final Set<String> ALWAYS_SHOWN = Set.of(
+            "SESSION_START", "STRICT_NETWORK_LOCK_ENABLED", "EGRESS_FIREWALL_ENABLED",
+            "EGRESS_FIREWALL_FALLBACK", "FILE_LOCK_ENABLED", "FILE_LOCK_SKIPPED", "SESSION_END");
+
+    /**
+     * The first 30 seconds are the machine settling down (apps closing, locks
+     * arming), not the student acting - those rows stay in the sealed log but
+     * never reach the live screen or the counters.
+     */
+    private boolean hiddenDuringStartup(ExamSession session, Violation violation) {
+        if (ALWAYS_SHOWN.contains(violation.getType())) return false;
+        return session.getStartTime().plusSeconds(30).isAfter(violation.getTimestamp());
     }
 
     private void showLockdownFailure(String detail) {        String text = detail == null || detail.isBlank()

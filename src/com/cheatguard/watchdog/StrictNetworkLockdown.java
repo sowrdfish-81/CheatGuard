@@ -398,6 +398,11 @@ public final class StrictNetworkLockdown implements Closeable {
     /**
      * Pure path collection (testable): profile content folders, desktop children
      * except the exam folder and shortcuts, plus the given extra drive roots.
+     *
+     * Ancestor safety: a folder that CONTAINS the exam folder (for example OneDrive
+     * when the Desktop is OneDrive-redirected) is never locked wholesale - denying
+     * it would inherit down onto the exam folder itself. Its OTHER children are
+     * locked instead, so only the exam chain stays open.
      */
     public static List<String> collectLockPaths(File profile, File desktop, File examFolder,
                                                 List<File> extraRoots) {
@@ -407,25 +412,67 @@ public final class StrictNetworkLockdown implements Closeable {
                     "Videos", "Saved Games", "Contacts", "Links", "OneDrive", "3D Objects",
                     "Searches"}) {
                 File f = new File(profile, name);
-                if (f.isDirectory()) out.add(f.getAbsolutePath());
-            }
-        }
-        if (desktop != null && desktop.isDirectory()) {
-            File[] kids = desktop.listFiles();
-            if (kids != null) {
-                for (File kid : kids) {
-                    if (examFolder != null && sameTarget(kid, examFolder)) continue;
-                    if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
-                    out.add(kid.getAbsolutePath());
+                if (!f.isDirectory()) continue;
+                if (isAncestorOrSelf(f, examFolder)) {
+                    lockChildrenExceptExam(f, examFolder, out, 0);
+                } else {
+                    out.add(f.getAbsolutePath());
                 }
             }
         }
+        if (desktop != null && desktop.isDirectory()) {
+            lockChildrenExceptExam(desktop, examFolder, out, 0);
+        }
         if (extraRoots != null) {
             for (File root : extraRoots) {
-                if (root.exists()) out.add(root.getAbsolutePath());
+                if (!root.exists()) continue;
+                if (isAncestorOrSelf(root, examFolder)) {
+                    lockChildrenExceptExam(root, examFolder, out, 0);
+                } else {
+                    out.add(root.getAbsolutePath());
+                }
             }
         }
         return out;
+    }
+
+    /** Deny a folder's children, but leave the chain to the exam folder open. */
+    private static void lockChildrenExceptExam(File folder, File examFolder,
+                                               List<String> out, int depth) {
+        if (folder == null || !folder.isDirectory() || depth > 4) return;
+        File[] kids = folder.listFiles();
+        if (kids == null) return;
+        for (File kid : kids) {
+            if (examFolder != null && sameTarget(kid, examFolder)) continue; // the exam folder itself
+            if (examFolder != null && isAncestor(kid, examFolder)) {         // on the exam chain
+                lockChildrenExceptExam(kid, examFolder, out, depth + 1);
+                continue;
+            }
+            if (kid.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".lnk")) continue;
+            out.add(kid.getAbsolutePath());
+        }
+    }
+
+    private static boolean isAncestorOrSelf(File dir, File examFolder) {
+        return sameTarget(dir, examFolder) || isAncestor(dir, examFolder);
+    }
+
+    /** True when the exam folder lives INSIDE the given folder (strictly below it). */
+    private static boolean isAncestor(File dir, File examFolder) {
+        if (dir == null || examFolder == null) return false;
+        String d;
+        String e;
+        try {
+            d = dir.getCanonicalPath();
+            e = examFolder.getCanonicalPath();
+        } catch (Exception ex) {
+            d = dir.getAbsolutePath();
+            e = examFolder.getAbsolutePath();
+        }
+        d = d.toLowerCase(java.util.Locale.ROOT);
+        e = e.toLowerCase(java.util.Locale.ROOT);
+        if (!d.endsWith("\\")) d = d + "\\";
+        return e.startsWith(d);
     }
 
     private static boolean sameTarget(File a, File b) {
