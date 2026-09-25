@@ -39,6 +39,7 @@ public class CoreFlowTest {
         checkAdminAuth();
         checkVault();
         checkSiteNormalize();
+        checkAppDefaultsAndNames();
         checkDnsServer();
         checkProcessScanner();
         checkDnsWireParser();
@@ -181,6 +182,43 @@ public class CoreFlowTest {
         expect("invalid single word rejected", AppConfig.normalizeSite("com").isEmpty());
         expect("trailing dots", AppConfig.normalizeSite("vjudge.net..").equals("vjudge.net"));
         expect("uppercase", AppConfig.normalizeSite("CodeChef.COM").equals("codechef.com"));
+    }
+
+    private static void checkAppDefaultsAndNames() throws Exception {
+        section("App defaults v3 and app display names");
+        expect("account login site is not allowed by default",
+                !AppConfig.getInstance().isSiteAllowed("accounts.google.com"));
+        expect("google search is not allowed by default either",
+                !AppConfig.getInstance().isSiteAllowed("www.google.com"));
+        expect("a fresh install allows NO websites at all",
+                AppConfig.getInstance().getAllowedSites().isEmpty());
+        AppConfig.getInstance().setAppDisplayName("code.exe", "Visual Studio Code");
+        expect("display name is stored and returned",
+                "Visual Studio Code".equals(
+                        AppConfig.getInstance().getAppDisplayName("code.exe")));
+        expect("friendlyName prefers the stored real name",
+                "Visual Studio Code".equals(
+                        com.cheatguard.watchdog.ProcessWhitelist.friendlyName("code.exe")));
+        AppConfig.getInstance().removeAllowedProcess("code.exe");
+        expect("removing the app clears its display name",
+                AppConfig.getInstance().getAppDisplayName("code.exe") == null);
+
+        // v4 upgrade simulation: an old v3 config loses its default judge sites,
+        // while sites the admin added themselves survive the upgrade.
+        File wl = AppPaths.getWhitelistFile();
+        java.util.Properties legacy = new java.util.Properties();
+        legacy.setProperty("allowlist.defaults.version", "3");
+        legacy.setProperty("allowed.sites", "codeforces.com,example.org");
+        java.io.FileWriter fw = new java.io.FileWriter(wl);
+        legacy.store(fw, "old config");
+        fw.close();
+        java.lang.reflect.Field f = AppConfig.class.getDeclaredField("instance");
+        f.setAccessible(true);
+        f.set(null, null);
+        expect("v4 upgrade removes the old default judge sites",
+                !AppConfig.getInstance().isSiteAllowed("codeforces.com"));
+        expect("v4 upgrade keeps sites the admin added themselves",
+                AppConfig.getInstance().isSiteAllowed("example.org"));
     }
 
     // --------------------------------------------------------------------- DNS

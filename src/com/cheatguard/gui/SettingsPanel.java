@@ -7,6 +7,7 @@ import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 /** Administrator screen: allowed applications, allowed websites and the admin password. */
@@ -59,31 +60,75 @@ public class SettingsPanel extends JPanel {
         refresh(processModel, config.getAllowedProcesses());
         JList<String> list = new JList<>(processModel);
         UITheme.styleList(list);
+        // show the app's real name in the allowed list, exe name stays the model value
+        list.setCellRenderer((l, value, index, selected, focus) -> {
+            JLabel label = new JLabel(displayName(value));
+            label.setBorder(UITheme.padding(0, 4, 0, 4));
+            label.setForeground(selected ? list.getSelectionForeground() : list.getForeground());
+            label.setBackground(selected ? list.getSelectionBackground() : list.getBackground());
+            label.setOpaque(true);
+            return label;
+        });
 
-        JTextField input = UITheme.field("code.exe");
-        JButton add = UITheme.secondary("Add");
-        JButton browse = UITheme.ghost("Choose .exe");
-        JButton remove = UITheme.ghost("Remove selected");
-
-        Runnable addAction = () -> {
-            String value = input.getText().trim();
-            if (value.isEmpty()) return;
-            config.addAllowedProcess(value);
-            refresh(processModel, config.getAllowedProcesses());
-            input.setText("");
+        // search bar: type a few letters, matching INSTALLED apps appear by their
+        // real names; picking one adds the exe it points to.
+        JTextField search = UITheme.field("Search installed apps...");
+        DefaultListModel<String> matchModel = new DefaultListModel<>();
+        JList<String> matches = new JList<>(matchModel);
+        UITheme.styleList(matches);
+        matches.setVisibleRowCount(6);
+        List<com.cheatguard.config.InstalledApps.App> installed =
+                com.cheatguard.config.InstalledApps.list();
+        Runnable refill = () -> {
+            String q = search.getText().trim().toLowerCase();
+            matchModel.clear();
+            for (com.cheatguard.config.InstalledApps.App app : installed) {
+                if (q.isEmpty()
+                        || app.displayName().toLowerCase().contains(q)) {
+                    matchModel.addElement(app.displayName() + "  \u2192  " + app.lnkPath());
+                }
+            }
         };
-        add.addActionListener(e -> addAction.run());
-        input.addActionListener(e -> addAction.run());
+        refill.run();
+        search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+        });
+
+        JButton add = UITheme.secondary("Add selected");
+        add.addActionListener(e -> {
+            String chosen = matches.getSelectedValue();
+            if (chosen == null) return;
+            String lnkPath = chosen.substring(chosen.indexOf("  \u2192  ") + 5).trim();
+            String target = com.cheatguard.config.InstalledApps.resolveTarget(lnkPath);
+            if (target == null || target.isBlank()
+                    || !target.toLowerCase().endsWith(".exe")) {
+                JOptionPane.showMessageDialog(this,
+                        "Could not resolve that app's program file.", "Not added",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            String exeName = new java.io.File(target).getName();
+            config.addAllowedProcessPath(new java.io.File(target));
+            config.setAppDisplayName(exeName, chosen.substring(0, chosen.indexOf("  \u2192  ")).trim());
+            refresh(processModel, config.getAllowedProcesses());
+            search.setText("");
+        });
+
+        JButton browse = UITheme.ghost("Choose .exe");
         browse.addActionListener(e -> {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Choose an application to allow");
             chooser.setFileFilter(new FileNameExtensionFilter("Windows applications (*.exe)", "exe"));
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                // Storing the full path lets the monitor screen launch it on the exam folder.
-                config.addAllowedProcessPath(chooser.getSelectedFile());
+                java.io.File exe = chooser.getSelectedFile();
+                config.addAllowedProcessPath(exe);
+                config.setAppDisplayName(exe.getName(), realAppName(exe));
                 refresh(processModel, config.getAllowedProcesses());
             }
         });
+        JButton remove = UITheme.ghost("Remove selected");
         remove.addActionListener(e -> {
             String selected = list.getSelectedValue();
             if (selected == null) return;
@@ -91,9 +136,70 @@ public class SettingsPanel extends JPanel {
             refresh(processModel, config.getAllowedProcesses());
         });
 
-        return card("Allowed applications",
-                "Anything else a student opens is closed automatically. Use \"Choose .exe\" so the app can also be launched on the exam folder during a session.",
-                list, input, add, browse, remove);
+        return appCard("Allowed applications",
+                "Add apps by searching their real names - anything else a student opens is closed automatically. Use \"Choose .exe\" for a portable program.",
+                list, search, matchModel, matches, add, browse, remove);
+    }
+
+    /** Read an exe's real name from its version information (best effort). */
+    private String realAppName(java.io.File exe) {
+        try {
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-WindowStyle", "Hidden", "-Command",
+                    "(Get-Item '" + exe.getAbsolutePath().replace("'", "''")
+                            + "').VersionInfo.ProductName")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            if (!out.isBlank() && !out.toLowerCase().contains("error")) return out;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** Display name for an allowed exe: real name when known, else the exe name. */
+    private String displayName(String exeName) {
+        String real = config.getAppDisplayName(exeName);
+        return real != null ? real : com.cheatguard.watchdog.ProcessWhitelist.friendlyName(exeName);
+    }
+
+    /** The applications card: heading, hint, allowed list, search picker, actions. */
+    private JComponent appCard(String heading, String hintText, JList<String> list,
+                               JTextField search, DefaultListModel<String> matchModel,
+                               JList<String> matches, JButton add, JButton extra, JButton remove) {
+        JPanel card = UITheme.card();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+
+        JScrollPane scroll = UITheme.scroll(list);
+        scroll.setAlignmentX(LEFT_ALIGNMENT);
+        scroll.setPreferredSize(new Dimension(300, 220));
+
+        JScrollPane matchScroll = UITheme.scroll(matches);
+        matchScroll.setAlignmentX(LEFT_ALIGNMENT);
+        matchScroll.setPreferredSize(new Dimension(300, 130));
+
+        search.setMaximumSize(new Dimension(460, 40));
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        actions.setOpaque(false);
+        actions.setAlignmentX(LEFT_ALIGNMENT);
+        actions.add(add);
+        actions.add(extra);
+        actions.add(remove);
+
+        card.add(leftAlign(UITheme.row(0, UITheme.section(heading))));
+        card.add(Box.createVerticalStrut(6));
+        card.add(leftAlign(UITheme.row(0, hint(hintText))));
+        card.add(Box.createVerticalStrut(14));
+        card.add(leftAlign(search));
+        card.add(Box.createVerticalStrut(8));
+        card.add(leftAlign(matchScroll));
+        card.add(Box.createVerticalStrut(10));
+        card.add(leftAlign(actions));
+        card.add(Box.createVerticalStrut(12));
+        card.add(leftAlign(scroll));
+        return card;
     }
 
     private JComponent buildSiteCard() {
@@ -206,8 +312,7 @@ public class SettingsPanel extends JPanel {
 
     /** One list card: heading, hint, list, add row and secondary actions. */
     private JComponent card(String heading, String hintText, JList<String> list,
-                            JTextField input, JButton addBtn, JButton extraBtn, JButton removeBtn) {
-        JPanel card = UITheme.card();
+                            JTextField input, JButton addBtn, JButton extraBtn, JButton removeBtn) {        JPanel card = UITheme.card();
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
 
         JScrollPane scroll = UITheme.scroll(list);

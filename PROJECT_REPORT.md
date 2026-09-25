@@ -14,13 +14,13 @@ answers. The last section is for everyone.
 
 | Member | Files owned |
 |---|---|
-| Member 1 (Core & Security) | core: Violation, LogManager, ExamSession, AppLog · config: AppPaths, AppConfig · security: AdminAuth, AdminCredentialStore, AesEncryptor, Sha256Signer, SecurityVault, FileLockManager, InstanceGuard, LogProtection — 14 files |
+| Member 1 (Core & Security) | core: Violation, LogManager, ExamSession, AppLog · config: AppPaths, AppConfig, InstalledApps · security: AdminAuth, AdminCredentialStore, AesEncryptor, Sha256Signer, SecurityVault, FileLockManager, InstanceGuard, LogProtection — 15 files |
 | Member 2 (Blocking Engine) | watchdog (all 15): WatchdogEngine, DnsAllowlistServer, StrictNetworkLockdown, WebsiteViolationReporter, ProcessScanner, ProcessInfo, ProcessWhitelist, ProcessController, PowerShellUtil, SiteMonitor, FolderAccessMonitor, ExternalDeviceMonitor, SessionEnvironment, AllowedAppLauncher, ViolationListener + resources/network-lockdown.ps1 |
 | Member 3 (UI, Installer & Testing) | Main.java · gui: UITheme, LogDisplayFormatter, SettingsPanel, DashboardPanel · build-installer.bat · test/CoreFlowTest.java |
 
 ---
 
-# PART A — MEMBER 1: Core & Security (14 files)
+# PART A — MEMBER 1: Core & Security (15 files)
 
 ## A1. What I say (opening, about 3 minutes)
 
@@ -621,12 +621,17 @@ public class AppConfig {
             "codeforces.com", "atcoder.jp", "codechef.com", "leetcode.com",
             "hackerrank.com", "hackerearth.com", "topcoder.com", "cses.fi",
             "spoj.com", "vjudge.net", "lightoj.com", "beecrowd.com", "toph.co",
-            // Google sign-in, search and page assets used by the judges
-            "google.com", "accounts.google.com", "gstatic.com", "googleusercontent.com",
+            // page assets used by the judges (Google search/login/mail stay OUT)
+            "gstatic.com", "googleusercontent.com", "ssl.gstatic.com",
     };
 
+    /** Search/login/mail sites removed from the defaults in version 3 (the subdomain
+     *  rule would otherwise keep accounts.google.com and mail.google.com allowed). */
+    private static final Set<String> REMOVED_IN_V3 =
+            Set.of("accounts.google.com", "gmail.com", "google.com");
+
     /** Bump when the default lists change; missing defaults are merged in once per version. */
-    private static final String DEFAULTS_VERSION = "2";
+    private static final String DEFAULTS_VERSION = "3";
 
     private static AppConfig instance;
     private final File configFile = AppPaths.getWhitelistFile();
@@ -634,6 +639,8 @@ public class AppConfig {
     private final Set<String> allowedSites = new TreeSet<>();
     /** Executable name to full launch path, for apps the admin picked from disk. */
     private final Map<String, String> processPaths = new TreeMap<>();
+    /** Executable name to the app's real (marketing) name, e.g. code.exe -> Visual Studio Code. */
+    private final Map<String, String> displayNames = new TreeMap<>();
 
     private AppConfig() { load(); }
 
@@ -666,8 +673,17 @@ public class AppConfig {
             String path = entry.substring(bar + 1).trim();
             if (!name.isEmpty() && !path.isEmpty()) processPaths.put(name, path);
         }
+        // Real app names: appname.code.exe=Visual Studio Code
+        for (String key : props.stringPropertyNames()) {
+            if (key.startsWith("appname.")) {
+                String exe = normalizeProcess(key.substring(8));
+                String display = props.getProperty(key, "").trim();
+                if (!exe.isEmpty() && !display.isEmpty()) displayNames.put(exe, display);
+            }
+        }
         // One-time merge of a new default set into an existing configuration; after
         // this the marker is current, so entries an admin removed stay removed.
+        // Version 3 also REMOVES the account/login sites from the defaults.
         boolean merged = false;
         if (!DEFAULTS_VERSION.equals(props.getProperty("allowlist.defaults.version", "1"))) {
             for (String p : DEFAULT_PROCESSES) {
@@ -676,6 +692,9 @@ public class AppConfig {
             for (String s : DEFAULT_SITES) {
                 String normalized = normalizeSite(s);
                 if (!normalized.isEmpty() && allowedSites.add(normalized)) merged = true;
+            }
+            for (String gone : REMOVED_IN_V3) {
+                if (allowedSites.remove(normalizeSite(gone))) merged = true;
             }
         }
         if (!configFile.exists() || merged) save();
@@ -692,6 +711,9 @@ public class AppConfig {
             paths.append(e.getKey()).append('|').append(e.getValue());
         }
         props.setProperty("allowed.process.paths", paths.toString());
+        for (Map.Entry<String, String> e : displayNames.entrySet()) {
+            props.setProperty("appname." + e.getKey(), e.getValue());
+        }
         try {
             File parent = configFile.getParentFile();
             if (parent != null) parent.mkdirs();
@@ -718,6 +740,20 @@ public class AppConfig {
         save();
     }
 
+    /** Store the app's real (marketing) name shown in lists and logs. */
+    public synchronized void setAppDisplayName(String exeName, String displayName) {
+        String key = normalizeProcess(exeName);
+        if (key.isEmpty() || displayName == null || displayName.isBlank()) return;
+        displayNames.put(key, displayName.trim());
+        save();
+    }
+
+    /** The app's real name when known, or null to fall back to the exe name. */
+    public synchronized String getAppDisplayName(String exeName) {
+        if (exeName == null) return null;
+        return displayNames.get(normalizeProcess(exeName));
+    }
+
     public synchronized Set<String> getAllowedProcesses() { return new TreeSet<>(allowedProcesses); }
     public synchronized Set<String> getAllowedSites() { return new TreeSet<>(allowedSites); }
 
@@ -730,6 +766,7 @@ public class AppConfig {
             String key = normalizeProcess(name);
             allowedProcesses.remove(key);
             processPaths.remove(key);
+            displayNames.remove(key);
             save();
         }
     }
@@ -815,6 +852,106 @@ public class AppConfig {
 - `normalizeSite()` ends with a REGEX that demands a real domain shape —
   without it, a bare "com" entry would allow nearly every site (because of the
   subdomain rule). `normalizeProcess()` adds `.exe` when missing.
+- **Defaults version 3/4 notes**: version 3 removed the Google login/search/mail
+  sites (accounts.google.com, google.com, gmail.com - the subdomain rule would
+  otherwise have kept accounts.google.com allowed through google.com); version 4
+  made the site list start EMPTY on every install, so the invigilator adds the
+  exam sites one by one. Apps also carry a display-name map
+  (`appname.code.exe=Visual Studio Code`) so lists and logs show real app names.
+
+### 6b) config/InstalledApps.java — the installed-app search
+
+```java
+package com.cheatguard.config;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Lists the applications INSTALLED on the computer by walking the Start Menu
+ * shortcuts. A shortcut's file name is the app's real display name ("Visual
+ * Studio Code.lnk"), and its target exe is resolved on demand with the
+ * WScript.Shell COM object, so the walk stays fast even with hundreds of apps.
+ */
+public final class InstalledApps {
+
+    /** One installed app found in the Start Menu. */
+    public record App(String lnkPath, String displayName) {
+    }
+
+    private InstalledApps() {
+    }
+
+    /** Every Start Menu shortcut, sorted by display name, duplicates removed. */
+    public static List<App> list() {
+        Set<String> seen = new HashSet<>();
+        List<App> apps = new ArrayList<>();
+        for (String root : startMenuRoots()) {
+            walk(new File(root), apps, seen, 0);
+        }
+        apps.sort((a, b) -> a.displayName().compareToIgnoreCase(b.displayName()));
+        return apps;
+    }
+
+    /** Resolve the exe a shortcut points at (empty string when it cannot be read). */
+    public static String resolveTarget(String lnkPath) {
+        String quoted = "'" + lnkPath.replace("'", "''") + "'";
+        String script = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut(" + quoted + ");"
+                + "$s.TargetPath";
+        try {
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-WindowStyle", "Hidden", "-Command", script)
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            p.waitFor(15, TimeUnit.SECONDS);
+            return out;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static List<String> startMenuRoots() {
+        List<String> roots = new ArrayList<>();
+        String programData = System.getenv("ProgramData");
+        if (programData != null && !programData.isBlank()) {
+            roots.add(programData + "\\Microsoft\\Windows\\Start Menu\\Programs");
+        }
+        String appData = System.getenv("APPDATA");
+        if (appData != null && !appData.isBlank()) {
+            roots.add(appData + "\\Microsoft\\Windows\\Start Menu\\Programs");
+        }
+        return roots;
+    }
+
+    private static void walk(File dir, List<App> apps, Set<String> seen, int depth) {
+        if (dir == null || !dir.isDirectory() || depth > 5) return;
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        for (File kid : new ArrayList<>(Arrays.asList(kids))) {
+            String name = kid.getName();
+            if (kid.isDirectory()) {
+                walk(kid, apps, seen, depth + 1);
+            } else if (name.toLowerCase(Locale.ROOT).endsWith(".lnk")) {
+                String display = name.substring(0, name.length() - 4).trim();
+                if (display.isEmpty() || !seen.add(display.toLowerCase(Locale.ROOT))) continue;
+                apps.add(new App(kid.getAbsolutePath(), display));
+            }
+        }
+    }
+}
+```
+
+Walks the Start Menu folders (machine-wide and the user's own) collecting
+shortcut files: a shortcut's file name IS the app's real display name, and the
+target exe is resolved on demand with the WScript.Shell COM object, so the walk
+stays fast even with hundreds of apps installed.
 
 ### 7) security/AdminAuth.java — the friendly face of the password
 
@@ -3320,6 +3457,10 @@ public final class StrictNetworkLockdown implements Closeable {
 - `detectSystemUpstreams` captures the machine's current resolvers (skipping
   loopback) so approved sites keep working on campus networks.
 
+A note on private browsing: incognito windows use the same system DNS, the
+same DoH-off policies and the same firewall - none of the layers care which
+browser mode the student picks, so private windows get no bypass.
+
 **Part 4 — stop and stale recovery:**
 
 ```java
@@ -5187,11 +5328,21 @@ public class ProcessWhitelist {
         return processName != null && BROWSERS.contains(processName.toLowerCase(Locale.ROOT));
     }
 
-    /** "codeblocks.exe" becomes "Codeblocks", for log rows an invigilator reads. */
+    /** "code.exe" becomes "Visual Studio Code" (stored real name) or "Code". */
     public static String friendlyName(String processName) {
         if (processName == null || processName.isBlank()) return "Unknown app";
         String n = processName.trim();
-        if (n.toLowerCase(Locale.ROOT).endsWith(".exe")) n = n.substring(0, n.length() - 4);
+        String lower = n.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".exe")) {
+            try {
+                String real = com.cheatguard.config.AppConfig.getInstance()
+                        .getAppDisplayName(lower);
+                if (real != null && !real.isBlank()) return real;
+            } catch (Exception ignored) {
+                // config unavailable (tests, early boot): fall through to the exe name
+            }
+        }
+        if (lower.endsWith(".exe")) n = n.substring(0, n.length() - 4);
         n = n.replace('_', ' ').replace('-', ' ').trim();
         if (n.isEmpty()) return "Unknown app";
         return Character.toUpperCase(n.charAt(0)) + n.substring(1);
@@ -6006,7 +6157,7 @@ invigilator sees, how we built the one-file installer, and how we tested it all.
 ---
 
 # PART C — MEMBER 3: UI, Installer & Testing
-*(Main.java + the gui package + the build + the 68 checks)*
+*(Main.java + the gui package + the build + the 76 checks)*
 
 ## C1. What I say (about 3 minutes)
 
@@ -6026,7 +6177,7 @@ slow job runs on a worker thread and the screen is updated only through
 
 The installer: one script compiles the code, packs a jar, then `jpackage` with
 WiX produces ONE setup exe with its own trimmed Java runtime. The testing: our
-own automatic suite with 68 checks in 14 groups — all pass. My teammate will
+own automatic suite with 76 checks in 15 groups — all pass. My teammate will
 take questions on my part too if I miss anything."
 
 ## C2. Main.java — full code, part by part (1,077 lines)
@@ -6649,6 +6800,21 @@ Read the order — it is the lesson:
         } catch (Exception e) {
             return 1;
         }
+    }
+
+    /** Status rows that are always worth showing, even in the startup window. */
+    private static final Set<String> ALWAYS_SHOWN = Set.of(
+            "SESSION_START", "STRICT_NETWORK_LOCK_ENABLED", "EGRESS_FIREWALL_ENABLED",
+            "EGRESS_FIREWALL_FALLBACK", "FILE_LOCK_ENABLED", "FILE_LOCK_SKIPPED", "SESSION_END");
+
+    /**
+     * The first 30 seconds are the machine settling down (apps closing, locks
+     * arming), not the student acting - those rows stay in the sealed log but
+     * never reach the live screen or the counters.
+     */
+    private boolean hiddenDuringStartup(ExamSession session, Violation violation) {
+        if (ALWAYS_SHOWN.contains(violation.getType())) return false;
+        return session.getStartTime().plusSeconds(30).isAfter(violation.getTimestamp());
     }
 
     private void showLockdownFailure(String detail) {        String text = detail == null || detail.isBlank()
@@ -8020,6 +8186,7 @@ import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 /** Administrator screen: allowed applications, allowed websites and the admin password. */
@@ -8072,31 +8239,75 @@ public class SettingsPanel extends JPanel {
         refresh(processModel, config.getAllowedProcesses());
         JList<String> list = new JList<>(processModel);
         UITheme.styleList(list);
+        // show the app's real name in the allowed list, exe name stays the model value
+        list.setCellRenderer((l, value, index, selected, focus) -> {
+            JLabel label = new JLabel(displayName(value));
+            label.setBorder(UITheme.padding(0, 4, 0, 4));
+            label.setForeground(selected ? list.getSelectionForeground() : list.getForeground());
+            label.setBackground(selected ? list.getSelectionBackground() : list.getBackground());
+            label.setOpaque(true);
+            return label;
+        });
 
-        JTextField input = UITheme.field("code.exe");
-        JButton add = UITheme.secondary("Add");
-        JButton browse = UITheme.ghost("Choose .exe");
-        JButton remove = UITheme.ghost("Remove selected");
-
-        Runnable addAction = () -> {
-            String value = input.getText().trim();
-            if (value.isEmpty()) return;
-            config.addAllowedProcess(value);
-            refresh(processModel, config.getAllowedProcesses());
-            input.setText("");
+        // search bar: type a few letters, matching INSTALLED apps appear by their
+        // real names; picking one adds the exe it points to.
+        JTextField search = UITheme.field("Search installed apps...");
+        DefaultListModel<String> matchModel = new DefaultListModel<>();
+        JList<String> matches = new JList<>(matchModel);
+        UITheme.styleList(matches);
+        matches.setVisibleRowCount(6);
+        List<com.cheatguard.config.InstalledApps.App> installed =
+                com.cheatguard.config.InstalledApps.list();
+        Runnable refill = () -> {
+            String q = search.getText().trim().toLowerCase();
+            matchModel.clear();
+            for (com.cheatguard.config.InstalledApps.App app : installed) {
+                if (q.isEmpty()
+                        || app.displayName().toLowerCase().contains(q)) {
+                    matchModel.addElement(app.displayName() + "  \u2192  " + app.lnkPath());
+                }
+            }
         };
-        add.addActionListener(e -> addAction.run());
-        input.addActionListener(e -> addAction.run());
+        refill.run();
+        search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { refill.run(); }
+        });
+
+        JButton add = UITheme.secondary("Add selected");
+        add.addActionListener(e -> {
+            String chosen = matches.getSelectedValue();
+            if (chosen == null) return;
+            String lnkPath = chosen.substring(chosen.indexOf("  \u2192  ") + 5).trim();
+            String target = com.cheatguard.config.InstalledApps.resolveTarget(lnkPath);
+            if (target == null || target.isBlank()
+                    || !target.toLowerCase().endsWith(".exe")) {
+                JOptionPane.showMessageDialog(this,
+                        "Could not resolve that app's program file.", "Not added",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            String exeName = new java.io.File(target).getName();
+            config.addAllowedProcessPath(new java.io.File(target));
+            config.setAppDisplayName(exeName, chosen.substring(0, chosen.indexOf("  \u2192  ")).trim());
+            refresh(processModel, config.getAllowedProcesses());
+            search.setText("");
+        });
+
+        JButton browse = UITheme.ghost("Choose .exe");
         browse.addActionListener(e -> {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Choose an application to allow");
             chooser.setFileFilter(new FileNameExtensionFilter("Windows applications (*.exe)", "exe"));
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                // Storing the full path lets the monitor screen launch it on the exam folder.
-                config.addAllowedProcessPath(chooser.getSelectedFile());
+                java.io.File exe = chooser.getSelectedFile();
+                config.addAllowedProcessPath(exe);
+                config.setAppDisplayName(exe.getName(), realAppName(exe));
                 refresh(processModel, config.getAllowedProcesses());
             }
         });
+        JButton remove = UITheme.ghost("Remove selected");
         remove.addActionListener(e -> {
             String selected = list.getSelectedValue();
             if (selected == null) return;
@@ -8104,9 +8315,70 @@ public class SettingsPanel extends JPanel {
             refresh(processModel, config.getAllowedProcesses());
         });
 
-        return card("Allowed applications",
-                "Anything else a student opens is closed automatically. Use \"Choose .exe\" so the app can also be launched on the exam folder during a session.",
-                list, input, add, browse, remove);
+        return appCard("Allowed applications",
+                "Add apps by searching their real names - anything else a student opens is closed automatically. Use \"Choose .exe\" for a portable program.",
+                list, search, matchModel, matches, add, browse, remove);
+    }
+
+    /** Read an exe's real name from its version information (best effort). */
+    private String realAppName(java.io.File exe) {
+        try {
+            Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-WindowStyle", "Hidden", "-Command",
+                    "(Get-Item '" + exe.getAbsolutePath().replace("'", "''")
+                            + "').VersionInfo.ProductName")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            if (!out.isBlank() && !out.toLowerCase().contains("error")) return out;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** Display name for an allowed exe: real name when known, else the exe name. */
+    private String displayName(String exeName) {
+        String real = config.getAppDisplayName(exeName);
+        return real != null ? real : com.cheatguard.watchdog.ProcessWhitelist.friendlyName(exeName);
+    }
+
+    /** The applications card: heading, hint, allowed list, search picker, actions. */
+    private JComponent appCard(String heading, String hintText, JList<String> list,
+                               JTextField search, DefaultListModel<String> matchModel,
+                               JList<String> matches, JButton add, JButton extra, JButton remove) {
+        JPanel card = UITheme.card();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+
+        JScrollPane scroll = UITheme.scroll(list);
+        scroll.setAlignmentX(LEFT_ALIGNMENT);
+        scroll.setPreferredSize(new Dimension(300, 220));
+
+        JScrollPane matchScroll = UITheme.scroll(matches);
+        matchScroll.setAlignmentX(LEFT_ALIGNMENT);
+        matchScroll.setPreferredSize(new Dimension(300, 130));
+
+        search.setMaximumSize(new Dimension(460, 40));
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        actions.setOpaque(false);
+        actions.setAlignmentX(LEFT_ALIGNMENT);
+        actions.add(add);
+        actions.add(extra);
+        actions.add(remove);
+
+        card.add(leftAlign(UITheme.row(0, UITheme.section(heading))));
+        card.add(Box.createVerticalStrut(6));
+        card.add(leftAlign(UITheme.row(0, hint(hintText))));
+        card.add(Box.createVerticalStrut(14));
+        card.add(leftAlign(search));
+        card.add(Box.createVerticalStrut(8));
+        card.add(leftAlign(matchScroll));
+        card.add(Box.createVerticalStrut(10));
+        card.add(leftAlign(actions));
+        card.add(Box.createVerticalStrut(12));
+        card.add(leftAlign(scroll));
+        return card;
     }
 
     private JComponent buildSiteCard() {
@@ -8219,8 +8491,7 @@ public class SettingsPanel extends JPanel {
 
     /** One list card: heading, hint, list, add row and secondary actions. */
     private JComponent card(String heading, String hintText, JList<String> list,
-                            JTextField input, JButton addBtn, JButton extraBtn, JButton removeBtn) {
-        JPanel card = UITheme.card();
+                            JTextField input, JButton addBtn, JButton extraBtn, JButton removeBtn) {        JPanel card = UITheme.card();
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
 
         JScrollPane scroll = UITheme.scroll(list);
@@ -8317,11 +8588,13 @@ public class DashboardPanel extends JPanel {
     private final JLabel endValue = statValue("—");
     private final JLabel durationValue = statValue("—");
     private final JLabel redValue = statValue("0");
-    private final JPasswordField password = UITheme.password();
+    /** The password verified at the dashboard door - reused for open and delete. */
+    private final char[] sessionPassword;
 
-    public DashboardPanel(AdminAuth adminAuth, Runnable onBack) {
+    public DashboardPanel(AdminAuth adminAuth, char[] sessionPassword, Runnable onBack) {
         this.adminAuth = adminAuth;
         this.vault = new SecurityVault(adminAuth);
+        this.sessionPassword = sessionPassword == null ? new char[0] : sessionPassword;
         setLayout(new BorderLayout(16, 16));
         setBackground(UITheme.BG_DARK);
         setBorder(BorderFactory.createEmptyBorder(22, 22, 22, 22));
@@ -8343,7 +8616,10 @@ public class DashboardPanel extends JPanel {
         titles.add(Box.createVerticalStrut(4));
         titles.add(summaryLabel);
         JButton back = UITheme.ghost("Back");
-        back.addActionListener(e -> onBack.run());
+        back.addActionListener(e -> {
+            Arrays.fill(sessionPassword, '\0'); // leaving the dashboard: forget the password
+            onBack.run();
+        });
         header.add(titles, BorderLayout.WEST);
         header.add(back, BorderLayout.EAST);
         return header;
@@ -8385,16 +8661,13 @@ public class DashboardPanel extends JPanel {
         JPanel right = UITheme.card();
         right.setLayout(new BorderLayout(10, 10));
 
-        password.setFont(UITheme.FONT_BODY);
         JButton open = UITheme.primary("Open session");
         JPanel openRow = new JPanel(new BorderLayout(8, 0));
         openRow.setOpaque(false);
-        JLabel passLabel = UITheme.muted("Admin password");
-        openRow.add(passLabel, BorderLayout.WEST);
-        openRow.add(password, BorderLayout.CENTER);
+        openRow.add(UITheme.muted("Verified at the door - open or delete sessions freely."),
+                BorderLayout.CENTER);
         openRow.add(open, BorderLayout.EAST);
         open.addActionListener(e -> openSelected());
-        password.addActionListener(e -> openSelected());
 
         JPanel stats = new JPanel(new GridLayout(2, 3, 10, 10));
         stats.setOpaque(false);
@@ -8462,76 +8735,52 @@ public class DashboardPanel extends JPanel {
     private void openSelected() {
         File selected = logList.getSelectedValue();
         if (selected == null) { JOptionPane.showMessageDialog(this, "Select a session first."); return; }
-        char[] pw = password.getPassword();
-        if (pw.length == 0) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Enter the admin password first.", "Password required", JOptionPane.WARNING_MESSAGE);
-            password.setText("");
+        if (sessionPassword.length == 0) {
+            JOptionPane.showMessageDialog(this, "Open the dashboard with the admin password first.",
+                    "Password required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         // Opening derives a PBKDF2 key and can read a large log; do it off the UI thread.
         new Thread(() -> {
             String content;
             try {
-                content = vault.openLog(selected, pw.clone());
+                content = vault.openLog(selected, sessionPassword.clone());
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    password.setText("");
-                    JOptionPane.showMessageDialog(this, "Could not open log: " + ex.getMessage(),
-                            "Access denied", JOptionPane.ERROR_MESSAGE);
-                });
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Could not open log: " + ex.getMessage(),
+                        "Access denied", JOptionPane.ERROR_MESSAGE));
                 return;
-            } finally {
-                Arrays.fill(pw, '\0');
             }
             boolean unsealed = selected.getName().toLowerCase().endsWith(".dat");
-            SwingUtilities.invokeLater(() -> {
-                password.setText(""); // never leave the admin password sitting in the field
-                renderLogWithHighlights(content, unsealed);
-            });
+            SwingUtilities.invokeLater(() -> renderLogWithHighlights(content, unsealed));
         }, "CheatGuard-LogOpen").start();
     }
 
     private void deleteSelected() {
         File selected = logList.getSelectedValue();
         if (selected == null) { JOptionPane.showMessageDialog(this, "Select a session first."); return; }
-        char[] pw = password.getPassword();
-        if (pw.length == 0) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Enter the admin password first.", "Password required", JOptionPane.WARNING_MESSAGE);
-            password.setText("");
-            return;
-        }
-        if (!adminAuth.check(pw.clone()).success()) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Incorrect admin password.", "Access denied", JOptionPane.ERROR_MESSAGE);
+        if (sessionPassword.length == 0) {
+            JOptionPane.showMessageDialog(this, "Open the dashboard with the admin password first.",
+                    "Password required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         int ok = JOptionPane.showConfirmDialog(this,
                 "Permanently delete this student log?\n" + selected.getName(), "Delete log", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (ok != JOptionPane.YES_OPTION) {
-            Arrays.fill(pw, '\0');
-            return;
-        }
+        if (ok != JOptionPane.YES_OPTION) return;
         // Deleting a protected log can raise a Windows elevation prompt that waits on
         // the invigilator; keep the window responsive while it runs.
         new Thread(() -> {
             try {
-                vault.deleteLog(selected, pw.clone());
+                vault.deleteLog(selected, sessionPassword.clone());
                 SwingUtilities.invokeLater(() -> {
-                    password.setText("");
                     outputPane.setText("");
                     resetStats();
                     refreshLogs();
                 });
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    password.setText("");
-                    JOptionPane.showMessageDialog(this, "Could not delete log: " + ex.getMessage(),
-                            "Delete failed", JOptionPane.ERROR_MESSAGE);
-                });
-            } finally {
-                Arrays.fill(pw, '\0');
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Could not delete log: " + ex.getMessage(),
+                        "Delete failed", JOptionPane.ERROR_MESSAGE));
             }
         }, "CheatGuard-LogDelete").start();
     }
@@ -8762,7 +9011,7 @@ endlocal
    learned; `--compress zip-6` keeps it small). Output renamed to
    `dist\CheatGuard-Setup.exe` (~40 MB).
 
-## C8. test/CoreFlowTest.java — the 68 checks, full code
+## C8. test/CoreFlowTest.java — the 76 checks, full code
 
 ### Group runners and helpers
 
@@ -9428,6 +9677,22 @@ room, and seals the evidence."
    the exam folder by NTFS permissions. What remains: a note typed into an
    editor with no file name at all during the exam - no monitor can read a
    program's mind, but there is also no pre-exam file left to open.
+
+## Numbers to memorize
+
+| Fact | Value |
+|---|---|
+| Java classes / lines | 35 classes, ~6,000 lines |
+| PowerShell helper | ~730 lines |
+| Tests | 76 checks, 15 groups |
+| Password hashing | PBKDF2-HMAC-SHA256, 210,000 rounds, 16-byte salt |
+| Log sealing | AES-256-CBC + SHA-256 signature |
+| Password rule | 8+ chars, letters + number/symbol |
+| Wrong tries | 5 → lockout 30 s doubling, max 15 min |
+| DNS filter | 127.0.0.1:53 + ::1:53, cache 30 s |
+| Watchdog cycle | every 1.2 s; startup grace 60 s |
+| File walls | student account denied read access outside the exam folder |
+| Installer | one exe, ~40 MB, own Java runtime |
 
 ## The one-map revision (who calls whom)
 

@@ -32,17 +32,23 @@ public class AppConfig {
             "conhost.exe", "openconsole.exe",
     };
 
-    private static final String[] DEFAULT_SITES = {
-            // contest judges
-            "codeforces.com", "atcoder.jp", "codechef.com", "leetcode.com",
-            "hackerrank.com", "hackerearth.com", "topcoder.com", "cses.fi",
-            "spoj.com", "vjudge.net", "lightoj.com", "beecrowd.com", "toph.co",
-            // Google sign-in, search and page assets used by the judges
-            "google.com", "accounts.google.com", "gstatic.com", "googleusercontent.com",
-    };
+    /** Fresh installs start with NO websites allowed: the invigilator adds the
+     *  exam sites one by one. Apps for coding tests and labs DO ship allowed. */
+    private static final String[] DEFAULT_SITES = {};
+
+    /** Login/mail sites removed from the defaults in version 3. */
+    private static final Set<String> REMOVED_IN_V3 = Set.of("accounts.google.com", "gmail.com");
+
+    /** The site defaults of versions 1-3, removed from existing configs in version 4
+     *  so every exam starts with an empty site list (admins add what they need). */
+    private static final Set<String> REMOVED_IN_V4 = Set.of(
+            "codeforces.com", "atcoder.jp", "codechef.com", "leetcode.com", "hackerrank.com",
+            "hackerearth.com", "topcoder.com", "cses.fi", "spoj.com", "vjudge.net",
+            "lightoj.com", "beecrowd.com", "toph.co", "gstatic.com", "googleusercontent.com",
+            "ssl.gstatic.com", "google.com", "accounts.google.com", "gmail.com");
 
     /** Bump when the default lists change; missing defaults are merged in once per version. */
-    private static final String DEFAULTS_VERSION = "2";
+    private static final String DEFAULTS_VERSION = "4";
 
     private static AppConfig instance;
     private final File configFile = AppPaths.getWhitelistFile();
@@ -50,6 +56,8 @@ public class AppConfig {
     private final Set<String> allowedSites = new TreeSet<>();
     /** Executable name to full launch path, for apps the admin picked from disk. */
     private final Map<String, String> processPaths = new TreeMap<>();
+    /** Executable name to the app's real (marketing) name, e.g. code.exe -> Visual Studio Code. */
+    private final Map<String, String> displayNames = new TreeMap<>();
 
     private AppConfig() { load(); }
 
@@ -82,8 +90,17 @@ public class AppConfig {
             String path = entry.substring(bar + 1).trim();
             if (!name.isEmpty() && !path.isEmpty()) processPaths.put(name, path);
         }
+        // Real app names: appname.code.exe=Visual Studio Code
+        for (String key : props.stringPropertyNames()) {
+            if (key.startsWith("appname.")) {
+                String exe = normalizeProcess(key.substring(8));
+                String display = props.getProperty(key, "").trim();
+                if (!exe.isEmpty() && !display.isEmpty()) displayNames.put(exe, display);
+            }
+        }
         // One-time merge of a new default set into an existing configuration; after
         // this the marker is current, so entries an admin removed stay removed.
+        // Version 3 also REMOVES the account/login sites from the defaults.
         boolean merged = false;
         if (!DEFAULTS_VERSION.equals(props.getProperty("allowlist.defaults.version", "1"))) {
             for (String p : DEFAULT_PROCESSES) {
@@ -92,6 +109,12 @@ public class AppConfig {
             for (String s : DEFAULT_SITES) {
                 String normalized = normalizeSite(s);
                 if (!normalized.isEmpty() && allowedSites.add(normalized)) merged = true;
+            }
+            for (String gone : REMOVED_IN_V3) {
+                if (allowedSites.remove(normalizeSite(gone))) merged = true;
+            }
+            for (String gone : REMOVED_IN_V4) {
+                if (allowedSites.remove(normalizeSite(gone))) merged = true;
             }
         }
         if (!configFile.exists() || merged) save();
@@ -108,6 +131,9 @@ public class AppConfig {
             paths.append(e.getKey()).append('|').append(e.getValue());
         }
         props.setProperty("allowed.process.paths", paths.toString());
+        for (Map.Entry<String, String> e : displayNames.entrySet()) {
+            props.setProperty("appname." + e.getKey(), e.getValue());
+        }
         try {
             File parent = configFile.getParentFile();
             if (parent != null) parent.mkdirs();
@@ -134,6 +160,20 @@ public class AppConfig {
         save();
     }
 
+    /** Store the app's real (marketing) name shown in lists and logs. */
+    public synchronized void setAppDisplayName(String exeName, String displayName) {
+        String key = normalizeProcess(exeName);
+        if (key.isEmpty() || displayName == null || displayName.isBlank()) return;
+        displayNames.put(key, displayName.trim());
+        save();
+    }
+
+    /** The app's real name when known, or null to fall back to the exe name. */
+    public synchronized String getAppDisplayName(String exeName) {
+        if (exeName == null) return null;
+        return displayNames.get(normalizeProcess(exeName));
+    }
+
     public synchronized Set<String> getAllowedProcesses() { return new TreeSet<>(allowedProcesses); }
     public synchronized Set<String> getAllowedSites() { return new TreeSet<>(allowedSites); }
 
@@ -146,6 +186,7 @@ public class AppConfig {
             String key = normalizeProcess(name);
             allowedProcesses.remove(key);
             processPaths.remove(key);
+            displayNames.remove(key);
             save();
         }
     }

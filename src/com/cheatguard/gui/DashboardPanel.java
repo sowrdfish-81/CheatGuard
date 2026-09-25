@@ -30,11 +30,13 @@ public class DashboardPanel extends JPanel {
     private final JLabel endValue = statValue("—");
     private final JLabel durationValue = statValue("—");
     private final JLabel redValue = statValue("0");
-    private final JPasswordField password = UITheme.password();
+    /** The password verified at the dashboard door - reused for open and delete. */
+    private final char[] sessionPassword;
 
-    public DashboardPanel(AdminAuth adminAuth, Runnable onBack) {
+    public DashboardPanel(AdminAuth adminAuth, char[] sessionPassword, Runnable onBack) {
         this.adminAuth = adminAuth;
         this.vault = new SecurityVault(adminAuth);
+        this.sessionPassword = sessionPassword == null ? new char[0] : sessionPassword;
         setLayout(new BorderLayout(16, 16));
         setBackground(UITheme.BG_DARK);
         setBorder(BorderFactory.createEmptyBorder(22, 22, 22, 22));
@@ -56,7 +58,10 @@ public class DashboardPanel extends JPanel {
         titles.add(Box.createVerticalStrut(4));
         titles.add(summaryLabel);
         JButton back = UITheme.ghost("Back");
-        back.addActionListener(e -> onBack.run());
+        back.addActionListener(e -> {
+            Arrays.fill(sessionPassword, '\0'); // leaving the dashboard: forget the password
+            onBack.run();
+        });
         header.add(titles, BorderLayout.WEST);
         header.add(back, BorderLayout.EAST);
         return header;
@@ -98,16 +103,13 @@ public class DashboardPanel extends JPanel {
         JPanel right = UITheme.card();
         right.setLayout(new BorderLayout(10, 10));
 
-        password.setFont(UITheme.FONT_BODY);
         JButton open = UITheme.primary("Open session");
         JPanel openRow = new JPanel(new BorderLayout(8, 0));
         openRow.setOpaque(false);
-        JLabel passLabel = UITheme.muted("Admin password");
-        openRow.add(passLabel, BorderLayout.WEST);
-        openRow.add(password, BorderLayout.CENTER);
+        openRow.add(UITheme.muted("Verified at the door - open or delete sessions freely."),
+                BorderLayout.CENTER);
         openRow.add(open, BorderLayout.EAST);
         open.addActionListener(e -> openSelected());
-        password.addActionListener(e -> openSelected());
 
         JPanel stats = new JPanel(new GridLayout(2, 3, 10, 10));
         stats.setOpaque(false);
@@ -175,76 +177,52 @@ public class DashboardPanel extends JPanel {
     private void openSelected() {
         File selected = logList.getSelectedValue();
         if (selected == null) { JOptionPane.showMessageDialog(this, "Select a session first."); return; }
-        char[] pw = password.getPassword();
-        if (pw.length == 0) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Enter the admin password first.", "Password required", JOptionPane.WARNING_MESSAGE);
-            password.setText("");
+        if (sessionPassword.length == 0) {
+            JOptionPane.showMessageDialog(this, "Open the dashboard with the admin password first.",
+                    "Password required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         // Opening derives a PBKDF2 key and can read a large log; do it off the UI thread.
         new Thread(() -> {
             String content;
             try {
-                content = vault.openLog(selected, pw.clone());
+                content = vault.openLog(selected, sessionPassword.clone());
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    password.setText("");
-                    JOptionPane.showMessageDialog(this, "Could not open log: " + ex.getMessage(),
-                            "Access denied", JOptionPane.ERROR_MESSAGE);
-                });
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Could not open log: " + ex.getMessage(),
+                        "Access denied", JOptionPane.ERROR_MESSAGE));
                 return;
-            } finally {
-                Arrays.fill(pw, '\0');
             }
             boolean unsealed = selected.getName().toLowerCase().endsWith(".dat");
-            SwingUtilities.invokeLater(() -> {
-                password.setText(""); // never leave the admin password sitting in the field
-                renderLogWithHighlights(content, unsealed);
-            });
+            SwingUtilities.invokeLater(() -> renderLogWithHighlights(content, unsealed));
         }, "CheatGuard-LogOpen").start();
     }
 
     private void deleteSelected() {
         File selected = logList.getSelectedValue();
         if (selected == null) { JOptionPane.showMessageDialog(this, "Select a session first."); return; }
-        char[] pw = password.getPassword();
-        if (pw.length == 0) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Enter the admin password first.", "Password required", JOptionPane.WARNING_MESSAGE);
-            password.setText("");
-            return;
-        }
-        if (!adminAuth.check(pw.clone()).success()) {
-            Arrays.fill(pw, '\0');
-            JOptionPane.showMessageDialog(this, "Incorrect admin password.", "Access denied", JOptionPane.ERROR_MESSAGE);
+        if (sessionPassword.length == 0) {
+            JOptionPane.showMessageDialog(this, "Open the dashboard with the admin password first.",
+                    "Password required", JOptionPane.WARNING_MESSAGE);
             return;
         }
         int ok = JOptionPane.showConfirmDialog(this,
                 "Permanently delete this student log?\n" + selected.getName(), "Delete log", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (ok != JOptionPane.YES_OPTION) {
-            Arrays.fill(pw, '\0');
-            return;
-        }
+        if (ok != JOptionPane.YES_OPTION) return;
         // Deleting a protected log can raise a Windows elevation prompt that waits on
         // the invigilator; keep the window responsive while it runs.
         new Thread(() -> {
             try {
-                vault.deleteLog(selected, pw.clone());
+                vault.deleteLog(selected, sessionPassword.clone());
                 SwingUtilities.invokeLater(() -> {
-                    password.setText("");
                     outputPane.setText("");
                     resetStats();
                     refreshLogs();
                 });
             } catch (Exception ex) {
-                SwingUtilities.invokeLater(() -> {
-                    password.setText("");
-                    JOptionPane.showMessageDialog(this, "Could not delete log: " + ex.getMessage(),
-                            "Delete failed", JOptionPane.ERROR_MESSAGE);
-                });
-            } finally {
-                Arrays.fill(pw, '\0');
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Could not delete log: " + ex.getMessage(),
+                        "Delete failed", JOptionPane.ERROR_MESSAGE));
             }
         }, "CheatGuard-LogDelete").start();
     }

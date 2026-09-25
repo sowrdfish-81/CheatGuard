@@ -18,6 +18,16 @@ real time, and seals an undeletable audit log for every session.
   the needed apps from the monitor screen, which launches them ON the exam
   folder. Only then does monitoring and the alert counter begin. Windows shell
   components are never touched.
+- **No websites are allowed by default** — a fresh install starts with an EMPTY
+  website list; the invigilator adds the exam sites one by one (google.com,
+  accounts.google.com and gmail.com also stay out of any old config — the
+  subdomain rule would otherwise allow Google sign-in through google.com).
+- **Pick allowed apps by their real names** — the settings screen has a search
+  bar over the apps actually installed on the PC (from the Start Menu): type a
+  few letters, click the app, and its program file and real display name are
+  added. Lists and logs show "Visual Studio Code", never "code.exe". Private /
+  incognito windows get no bypass — the DNS filter, DoH-off policies and
+  firewall apply to the whole machine, whatever the browser mode is.
 - **Allowed apps stay inside the exam folder** — their window titles are
   watched: an allowed app showing a file outside the exam folder is closed and
   logged as a red alert. Editor tab titles must carry the exam folder's name
@@ -38,11 +48,11 @@ real time, and seals an undeletable audit log for every session.
   held; `ALERT` (red) = something actually got through: an unapproved folder, a USB
   device, an app that refused to close. The live header shows the running time, the
   ALERT count and the BLOCKED count separately.
-- **Coding-test allowlist built in** — fresh installs (and older configs, once) start
-  with the compilers, terminals, editors and contest judges a CP contest needs:
-  gcc/g++/MinGW, make/cmake, Java, Python, Node, VS Code, Code::Blocks, cmd/PowerShell,
-  and codeforces.com, atcoder.jp, codechef.com, leetcode.com, hackerrank.com, cses.fi,
-  vjudge.net, toph.co and more. Admins can remove any of them per exam.
+- **Coding-test apps built in** — fresh installs (and older configs, once) start
+  with the compilers, terminals and editors a CP contest or lab needs:
+  gcc/g++/MinGW, make/cmake, Java, Python, Node, VS Code, Code::Blocks,
+  cmd/PowerShell and more. Websites are NOT pre-allowed — the invigilator adds
+  the exam sites one by one.
 - **USB / external device monitor** — storage, network adapters and portable devices
   raise RED alerts the moment they appear.
 - **Sealed audit logs** — AES-256 with a PBKDF2-derived key, SHA-256 signature, and

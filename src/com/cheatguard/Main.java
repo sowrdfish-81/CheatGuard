@@ -644,11 +644,18 @@ public class Main {
         footer.setBorder(UITheme.padding(14, 18, 14, 18));
 
         // Approved apps: launching from here opens the app on the exam folder, so the
-        // student never needs to browse the disk to reach their workspace.
-        String[] apps = AppConfig.getInstance().getAllowedProcesses().stream()
-                .map(com.cheatguard.watchdog.ProcessWhitelist::friendlyName)
-                .toArray(String[]::new);
+        // student never needs to browse the disk to reach their workspace. The combo
+        // carries exe names; the renderer shows each app's real name.
+        String[] apps = AppConfig.getInstance().getAllowedProcesses().toArray(new String[0]);
         JComboBox<String> appCombo = UITheme.combo(apps);
+        appCombo.setRenderer((list, value, index, selected, focus) -> {
+            JLabel l = new JLabel(com.cheatguard.watchdog.ProcessWhitelist.friendlyName(value));
+            l.setOpaque(true);
+            l.setBackground(selected ? new Color(0x1E232C) : new Color(0x11141A));
+            l.setForeground(selected ? UITheme.ACCENT_TEAL : UITheme.TEXT_WHITE);
+            l.setBorder(UITheme.padding(4, 8, 4, 8));
+            return l;
+        });
         appCombo.setPreferredSize(new Dimension(200, 34));
         JButton openApp = UITheme.secondary("Open on exam folder");
         openApp.addActionListener(e -> {
@@ -908,12 +915,16 @@ public class Main {
     // -------------------------------------------------- admin-guarded screens
 
     private void openDashboard() {
+        // ONE password check at the door: the dashboard keeps the verified password
+        // in memory, so opening and deleting sessions never asks again.
         char[] password = promptAdminPassword("Open session dashboard");
         if (password == null) return;
-        if (verifyOrExplain(password)) {
-            replaceCard(CARD_DASHBOARD, new DashboardPanel(adminAuth, () -> showCard(CARD_HOME)));
-            showCard(CARD_DASHBOARD);
+        AdminCredentialStore.Result r = adminAuth.check(password.clone());
+        if (!r.success()) {
+            explainVerificationFailure(r);
+            return;
         }
+        replaceCard(CARD_DASHBOARD, new DashboardPanel(adminAuth, password, () -> showCard(CARD_HOME)));
     }
 
     private void openSettings() {

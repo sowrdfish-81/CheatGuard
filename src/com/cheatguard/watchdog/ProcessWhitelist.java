@@ -68,11 +68,21 @@ public class ProcessWhitelist {
         return processName != null && BROWSERS.contains(processName.toLowerCase(Locale.ROOT));
     }
 
-    /** "codeblocks.exe" becomes "Codeblocks", for log rows an invigilator reads. */
+    /** "code.exe" becomes "Visual Studio Code" (stored real name) or "Code". */
     public static String friendlyName(String processName) {
         if (processName == null || processName.isBlank()) return "Unknown app";
         String n = processName.trim();
-        if (n.toLowerCase(Locale.ROOT).endsWith(".exe")) n = n.substring(0, n.length() - 4);
+        String lower = n.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".exe")) {
+            try {
+                String real = com.cheatguard.config.AppConfig.getInstance()
+                        .getAppDisplayName(lower);
+                if (real != null && !real.isBlank()) return real;
+            } catch (Exception ignored) {
+                // config unavailable (tests, early boot): fall through to the exe name
+            }
+        }
+        if (lower.endsWith(".exe")) n = n.substring(0, n.length() - 4);
         n = n.replace('_', ' ').replace('-', ' ').trim();
         if (n.isEmpty()) return "Unknown app";
         return Character.toUpperCase(n.charAt(0)) + n.substring(1);
