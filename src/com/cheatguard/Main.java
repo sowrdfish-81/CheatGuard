@@ -48,6 +48,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class Main {
 
+    /** Visible in the window title, so "which build am I running" is never a guess. */
+    private static final String BUILD_STAMP = "2026-09-25 16:45";
+
     private static final InstanceGuard INSTANCE_GUARD = new InstanceGuard();
     private static final String CARD_FIRST_RUN = "FIRST_RUN";
     private static final String CARD_HOME = "HOME";
@@ -195,7 +198,7 @@ public class Main {
     }
 
     private void start() {
-        frame = new JFrame("Cheat.Guard");
+        frame = new JFrame("Cheat.Guard \u2014 build " + BUILD_STAMP);
         frame.setSize(1120, 720);
         frame.setMinimumSize(new Dimension(960, 640));
         frame.setLocationRelativeTo(null);
