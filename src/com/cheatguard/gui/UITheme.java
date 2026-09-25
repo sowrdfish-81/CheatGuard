@@ -7,6 +7,7 @@ import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.geom.Path2D;
 import java.io.InputStream;
 
 /**
@@ -241,10 +242,21 @@ public final class UITheme {
                 g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 int cx = getWidth() / 2;
                 int cy = getHeight() / 2;
-                g2.drawOval(cx - 9, cy - 5, 18, 10);
-                g2.fillOval(cx - 3, cy - 3, 6, 6);
-                // Slash while the text is visible: the icon always shows what a click does.
-                if (isSelected()) g2.drawLine(cx + 8, cy - 7, cx - 8, cy + 7);
+                // Almond eye: two curved lids meeting at the corners - a plain oval
+                // read as the "all-seeing eye", so the lids are drawn as curves.
+                Path2D almond = new Path2D.Double();
+                almond.moveTo(cx - 9, cy);
+                almond.quadTo(cx - 2, cy - 7, cx + 9, cy);
+                almond.quadTo(cx - 2, cy + 7, cx - 9, cy);
+                almond.closePath();
+                g2.draw(almond);
+                if (isSelected()) {
+                    // Text is visible: eye ON - open eye with a small pupil.
+                    g2.fillOval(cx - 2, cy - 2, 4, 4);
+                } else {
+                    // Text is hidden: eye OFF - closed eye with the classic slash.
+                    g2.drawLine(cx + 8, cy - 7, cx - 8, cy + 7);
+                }
                 g2.dispose();
             }
         };

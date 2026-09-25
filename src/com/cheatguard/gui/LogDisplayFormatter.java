@@ -77,6 +77,12 @@ public final class LogDisplayFormatter {
             case "ALLOWED_APP_OUTSIDE_FOLDER":
                 return "Allowed app had a file outside the exam folder open, closed: "
                         + orDefault(d, "an app");
+            case "ALLOWED_RUNTIME_OUTSIDE_FILE":
+                return "Allowed program ran a file outside the exam folder, closed: "
+                        + orDefault(d, "an app");
+            case "ALLOWED_APP_OUTSIDE_FOLDER_SHOWN":
+                return "Allowed app is showing content outside the exam folder: "
+                        + orDefault(d, "an app");
 
             case "BLOCKED_INTERNET_DOMAIN":
                 return "Website blocked: " + orDefault(d, "unknown site");

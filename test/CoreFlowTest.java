@@ -47,6 +47,8 @@ public class CoreFlowTest {
         checkSeverityLevels();
         checkAnswerIpParsing();
         checkTitlePathRule();
+        checkEditorTitleRule();
+        checkRuntimeArgRule();
 
         System.out.println();
         if (failures == 0) {
@@ -341,6 +343,48 @@ public class CoreFlowTest {
                 WatchdogEngine.titlePathOutside("D:/stuff/cheat.txt - Editor", exam) != null);
         expect("blank title is clean",
                 WatchdogEngine.titlePathOutside("", exam) == null);
+    }
+
+    private static void checkEditorTitleRule() {
+        section("Allowed editor folder-segment rule");
+        String vs = "Visual Studio Code";
+        expect("title with the exam folder is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "main.cpp - Exam_1 - " + vs, vs, "Exam_1", null));
+        expect("title with a foreign folder is flagged",
+                WatchdogEngine.editorShowsOutsideFolder(
+                        "notes.py - CheatNotes - " + vs, vs, "Exam_1", null));
+        expect("welcome page is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Get Started - " + vs, vs, "Exam_1", null));
+        expect("folder-only exam title is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Exam_1 - " + vs, vs, "Exam_1", null));
+        expect("untitled scratch tab is clean",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "Untitled-1 - " + vs, vs, "Exam_1", null));
+        expect("title not matching the editor suffix is ignored",
+                !WatchdogEngine.editorShowsOutsideFolder(
+                        "notes.py - CheatNotes - Some App", vs, "Exam_1", null));
+    }
+
+    private static void checkRuntimeArgRule() {
+        section("Allowed runtime argument rule");
+        String exam = "C:" + '\\' + "Users" + '\\' + "t" + '\\' + "Desktop" + '\\' + "Exam_1";
+        expect("exam-folder script argument is clean",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "-u", exam + '\\' + "solve.py"}, exam) == null);
+        expect("outside script argument is flagged",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "-u", "D:" + '\\' + "cheat" + '\\' + "solve.py"}, exam) != null);
+        expect("vs code tooling paths are ignored",
+                WatchdogEngine.runtimeArgOutside(new String[]{
+                        "C:" + '\\' + "Users" + '\\' + "t" + '\\' + ".vscode"
+                                + '\\' + "adapter.py"}, exam) == null);
+        expect("flag-only arguments are clean",
+                WatchdogEngine.runtimeArgOutside(new String[]{"-m", "jedi"}, exam) == null);
+        expect("no arguments is clean",
+                WatchdogEngine.runtimeArgOutside(null, exam) == null);
     }
 
     private static final String CRLF = new String(new char[]{'\r', '\n'});

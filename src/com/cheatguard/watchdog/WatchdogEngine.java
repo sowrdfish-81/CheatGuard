@@ -68,6 +68,30 @@ public class WatchdogEngine implements Runnable {
             "openvpn", "wireguard", "tailscale", "nordvpn", "expressvpn", "protonvpn",
             "cyberghost", "mullvad", "teamviewer", "anydesk", "rustdesk", "hamachi",
             "ultraviewer", "psiphon", "warp-svc", "cloudflarewarp");
+
+    /** Interpreters the allowlist permits - they may only touch exam-folder files. */
+    private static final Set<String> RUNTIME_NAMES = new HashSet<>(Arrays.asList(
+            "python.exe", "pythonw.exe", "py.exe"));
+
+    /** Default compiler output, allowed by name - so its location is checked instead. */
+    private static final Set<String> COMPILED_OUTPUT_NAMES = new HashSet<>(Arrays.asList("a.exe"));
+
+    /** Editor title suffixes: the tab title must carry the exam folder's name. */
+    private static final Map<String, String> EDITOR_TITLE_SUFFIXES = Map.of(
+            "code.exe", "Visual Studio Code",
+            "code - insiders.exe", "Visual Studio Code - Insiders",
+            "cursor.exe", "Cursor",
+            "subl.exe", "Sublime Text");
+
+    /** Editor tabs that never indicate a folder (welcome pages, tool panels). */
+    private static final Set<String> BENIGN_EDITOR_TABS = new HashSet<>(Arrays.asList(
+            "welcome", "get started", "new file", "settings", "extensions",
+            "keyboard shortcuts", "output", "problems", "terminal", "release notes",
+            "documentation"));
+
+    /** Tool paths (VS Code extensions, debugpy, stdlib) that appear in interpreter args. */
+    private static final List<String> TOOL_PATH_HINTS = List.of(
+            ".vscode", "extensions", "debugpy", "site-packages", "\\lib\\", "/lib/");
     public WatchdogEngine(LogManager logManager, File examFolder, ViolationListener listener) {
         this.logManager = logManager;
         this.listener = listener;
@@ -213,7 +237,22 @@ public class WatchdogEngine implements Runnable {
             if (name.equals("cheatguard.exe")) continue;
             boolean forced = isForcedClose(name);
             if (!forced && whitelist.isSystemProcess(name)) continue;
-            if (!forced && whitelist.isAllowed(name)) continue;
+
+            boolean approved = whitelist.isAllowed(name);
+            if (approved && !forced) {
+                // Allowed programs may only touch files inside the exam folder -
+                // running an old folder's file through a permitted tool is the trick.
+                String outside = allowedProgramOutsideFile(ph, name, command);
+                if (outside == null) continue;
+                boolean closedAllowed = controller.terminate(ph.pid());
+                emit(closedAllowed
+                        ? new Violation("ALLOWED_RUNTIME_OUTSIDE_FILE",
+                                ProcessWhitelist.friendlyName(name) + " was using " + outside,
+                                Violation.Severity.CRITICAL)
+                        : new Violation("UNAUTHORIZED_APP_CLOSE_FAILED",
+                                ProcessWhitelist.friendlyName(name), Violation.Severity.CRITICAL));
+                continue;
+            }
             if (!forced && (OWN_TOOL_NAMES.contains(name) || BACKGROUND_TOOL_NAMES.contains(name))) continue;
 
             String lowerCmd = command.toLowerCase(Locale.ROOT);
@@ -278,6 +317,89 @@ public class WatchdogEngine implements Runnable {
         return null;
     }
 
+    /**
+     * Allowed programs (interpreters, the default compiler output) may only touch
+     * files inside the exam folder. A python process whose arguments carry a file
+     * outside the folder, or an a.exe running from anywhere outside it, is the
+     * old-folder trick. Returns the offending path, or null when clean.
+     */
+    private String allowedProgramOutsideFile(ProcessHandle ph, String name, String command) {
+        if (examFolder == null) return null;
+        if (RUNTIME_NAMES.contains(name)) {
+            String[] args = null;
+            try { args = ph.info().arguments().orElse(null); } catch (Exception ignored) {}
+            return runtimeArgOutside(args, examFolder.getAbsolutePath());
+        }
+        if (COMPILED_OUTPUT_NAMES.contains(name)) {
+            for (String prefix : buildSystemPrefixes()) {
+                if (command.toLowerCase(Locale.ROOT).startsWith(prefix)) return null; // installed tool
+            }
+            return command; // compiled output running from outside the exam folder
+        }
+        return null;
+    }
+
+    /**
+     * First interpreter argument pointing outside the exam folder. Tool paths
+     * (VS Code extensions, debugpy, the stdlib) are ignored so the python
+     * debugger and language tooling never trip the rule.
+     */
+    public static String runtimeArgOutside(String[] args, String baseFolder) {
+        if (args == null || baseFolder == null || baseFolder.isBlank()) return null;
+        for (String arg : args) {
+            if (arg == null || arg.isBlank() || arg.startsWith("-")) continue;
+            String hit = titlePathOutside(arg, baseFolder);
+            if (hit == null) continue;
+            String lower = hit.toLowerCase(Locale.ROOT);
+            boolean toolPath = false;
+            for (String hint : TOOL_PATH_HINTS) {
+                if (lower.contains(hint)) { toolPath = true; break; }
+            }
+            if (!toolPath) return hit;
+        }
+        return null;
+    }
+
+    /**
+     * True when an allowed editor's title shows a folder that is NOT the exam
+     * folder. Red alert only - closing could destroy exam work open elsewhere.
+     */
+    private String editorShowingOutsideFolder(String processName, String title) {
+        if (title == null || title.isBlank() || examFolder == null) return null;
+        String suffix = EDITOR_TITLE_SUFFIXES.get(processName.toLowerCase(Locale.ROOT));
+        if (suffix == null) return null;
+        if (editorShowsOutsideFolder(title, suffix, examFolder.getName(), examFolder)) {
+            return ProcessWhitelist.friendlyName(processName);
+        }
+        return null;
+    }
+
+    /**
+     * Segment rule for editor titles ("file - folder - Editor"): the title must
+     * carry the exam folder's name, or name a file/folder that exists inside it.
+     * Welcome pages and untitled scratch tabs are clean.
+     */
+    public static boolean editorShowsOutsideFolder(String title, String suffix,
+                                                   String examFolderName, File examFolderDir) {
+        if (title == null || suffix == null || examFolderName == null) return false;
+        String t = title.trim();
+        if (!t.toLowerCase(Locale.ROOT).endsWith(suffix.toLowerCase(Locale.ROOT))) return false;
+        String prefix = t.substring(0, t.length() - suffix.length()).trim();
+        if (prefix.endsWith("-")) prefix = prefix.substring(0, prefix.length() - 1).trim();
+        if (prefix.isEmpty()) return false;
+        boolean suspicious = false;
+        for (String raw : prefix.split(" - ")) {
+            String seg = raw.trim();
+            if (seg.startsWith("\u25CF")) seg = seg.substring(1).trim(); // VS Code dirty dot
+            if (seg.equalsIgnoreCase(examFolderName)) return false;      // exam folder open
+            if (examFolderDir != null && new File(examFolderDir, seg).isFile()) return false;
+            if (seg.isEmpty() || BENIGN_EDITOR_TABS.contains(seg.toLowerCase(Locale.ROOT))
+                    || seg.toLowerCase(Locale.ROOT).startsWith("untitled")) continue;
+            suspicious = true;
+        }
+        return suspicious;
+    }
+
     private void checkProcesses() {
         List<ProcessInfo> visible = scanner.getRunningProcesses();
         Set<Long> stillVisibleBlocked = new HashSet<>();
@@ -285,12 +407,16 @@ public class WatchdogEngine implements Runnable {
             if (proc.getPid() == selfPid) continue;
             if (whitelist.isSystemProcess(proc.getName())) continue; // Windows component: never logged
 
-            // An ALLOWED app is only allowed to work on the exam folder. If its
-            // window title carries a drive path outside that folder (a file it has
-            // open), the approval is being abused - close it and raise a red flag.
+            // An ALLOWED app is only allowed to work on the exam folder. A drive
+            // path outside it in the window title (a file it has open) closes the
+            // app; an editor showing a foreign folder raises a red alert.
             String outsidePath = outsideExamPathInTitle(proc.getName(), proc.getWindowTitle());
+            String shownFolder = outsidePath == null
+                    ? editorShowingOutsideFolder(proc.getName(), proc.getWindowTitle())
+                    : null;
+            boolean flagged = outsidePath != null || shownFolder != null;
             boolean forced = isForcedClose(proc.getName());
-            boolean skip = outsidePath == null
+            boolean skip = !flagged
                     && ((!forced && whitelist.isAllowed(proc.getName()))
                         || isExamWorkspaceBinary(proc.getImagePath()));
             if (skip) continue;
@@ -306,6 +432,10 @@ public class WatchdogEngine implements Runnable {
                         ? new Violation("ALLOWED_APP_OUTSIDE_FOLDER",
                                 app + " was showing " + outsidePath, Violation.Severity.CRITICAL)
                         : new Violation("UNAUTHORIZED_APP_CLOSE_FAILED", app, Violation.Severity.CRITICAL));
+            } else if (shownFolder != null) {
+                // Red alert only - closing could destroy exam work in another window.
+                emit(new Violation("ALLOWED_APP_OUTSIDE_FOLDER_SHOWN",
+                        app + " was showing " + shownFolder, Violation.Severity.CRITICAL));
             } else if (baselineSweepDone) {
                 // Opened during the exam. Closing it is the enforcement, so only a
                 // failure to close leaves the student with a usable tool - that is RED.
