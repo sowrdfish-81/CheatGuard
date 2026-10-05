@@ -86,7 +86,15 @@ public final class AllowedAppLauncher {
             }
             List<String> command = new ArrayList<>();
             command.add(executable.getAbsolutePath());
-            if (FOLDER_AWARE.contains(name)) command.addAll(folderOpenArguments(name, examFolder));
+            // An app whose own shortcut carries launch arguments (Squirrel-style
+            // launchers: Discord's Update.exe needs --processStart Discord.exe) is
+            // started with exactly those; folder-aware editors get the exam folder.
+            String storedArgs = AppConfig.getInstance().getProcessArgs(name);
+            if (storedArgs != null && !storedArgs.isBlank()) {
+                command.addAll(Arrays.asList(storedArgs.split("\\s+")));
+            } else if (FOLDER_AWARE.contains(name)) {
+                command.addAll(folderOpenArguments(name, examFolder));
+            }
             ProcessBuilder pb = new ProcessBuilder(command);
             // Even when the app ignores the argument, starting it here makes the exam
             // folder the default location in its open/save dialogs.
@@ -107,9 +115,11 @@ public final class AllowedAppLauncher {
     private static File createStudentShortcut(File exe, File examFolder, String name) {
         try {
             File lnk = new File(examFolder, "Launch " + ProcessWhitelist.friendlyName(name) + ".lnk");
-            String args = "";
-            if (FOLDER_AWARE.contains(name)) {
-                args = String.join(" ", folderOpenArguments(name, examFolder));
+            String args = AppConfig.getInstance().getProcessArgs(name);
+            if (args == null || args.isBlank()) {
+                args = FOLDER_AWARE.contains(name)
+                        ? String.join(" ", folderOpenArguments(name, examFolder))
+                        : "";
             }
             String ps = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"
                     + lnk.getAbsolutePath().replace("'", "''") + "');"

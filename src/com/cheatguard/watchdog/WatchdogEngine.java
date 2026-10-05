@@ -448,7 +448,12 @@ public class WatchdogEngine implements Runnable {
             boolean forced = isForcedClose(proc.getName());
             boolean skip = !flagged
                     && ((!forced && whitelist.isAllowed(proc.getName()))
-                        || isExamWorkspaceBinary(proc.getImagePath()));
+                        || isExamWorkspaceBinary(proc.getImagePath())
+                        // The payload exe an approved launcher spawns (Discord.exe out
+                        // of the allowed Update.exe) is part of that app, not a
+                        // student program - only its ancestry vouches for it.
+                        || (!forced && ProcessHandle.of(proc.getPid())
+                                .map(this::hasAllowedAncestor).orElse(false)));
             if (skip) continue;
 
             stillVisibleBlocked.add(proc.getPid());

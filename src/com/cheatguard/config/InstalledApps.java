@@ -37,19 +37,33 @@ public final class InstalledApps {
 
     /** Resolve the exe a shortcut points at (empty string when it cannot be read). */
     public static String resolveTarget(String lnkPath) {
+        return resolveShortcut(lnkPath)[0];
+    }
+
+    /**
+     * Resolve a shortcut into { targetPath, arguments }. The arguments matter for
+     * Squirrel-style launchers - Discord's shortcut points at Update.exe with
+     * "--processStart Discord.exe" - without which the launched updater does
+     * nothing visible.
+     */
+    public static String[] resolveShortcut(String lnkPath) {
         String quoted = "'" + lnkPath.replace("'", "''") + "'";
         String script = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut(" + quoted + ");"
-                + "$s.TargetPath";
+                + "Write-Output $s.TargetPath; Write-Output $s.Arguments";
+        String[] out = {"", ""};
         try {
             Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
                     "-WindowStyle", "Hidden", "-Command", script)
                     .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(),
+            String all = new String(p.getInputStream().readAllBytes(),
                     java.nio.charset.StandardCharsets.UTF_8).trim();
             p.waitFor(15, TimeUnit.SECONDS);
+            String[] lines = all.split("\\R");
+            if (lines.length >= 1) out[0] = lines[0].trim();
+            if (lines.length >= 2) out[1] = lines[1].trim();
             return out;
         } catch (Exception e) {
-            return "";
+            return out;
         }
     }
 

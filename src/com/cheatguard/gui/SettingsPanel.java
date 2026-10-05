@@ -119,7 +119,8 @@ public class SettingsPanel extends JPanel {
             int idx = matches.getSelectedIndex();
             if (idx < 0 || idx >= shown.size()) return;
             com.cheatguard.config.InstalledApps.App app = shown.get(idx);
-            String target = com.cheatguard.config.InstalledApps.resolveTarget(app.lnkPath());
+            String[] shortcut = com.cheatguard.config.InstalledApps.resolveShortcut(app.lnkPath());
+            String target = shortcut[0];
             if (target == null || target.isBlank()
                     || !target.toLowerCase().endsWith(".exe")) {
                 JOptionPane.showMessageDialog(this,
@@ -130,6 +131,9 @@ public class SettingsPanel extends JPanel {
             java.io.File exe = new java.io.File(target);
             config.addAllowedProcessPath(exe);
             config.setAppDisplayName(exe.getName(), app.displayName());
+            // Keep the shortcut's launch arguments (Squirrel-style launchers such as
+            // Discord's Update.exe need "--processStart <app>.exe" to open at all).
+            config.setProcessArgs(exe.getName(), shortcut[1]);
             refresh(processModel, config.getAllowedProcesses());
             search.setText("");
             search.requestFocusInWindow();

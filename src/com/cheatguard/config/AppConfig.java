@@ -58,6 +58,9 @@ public class AppConfig {
     private final Map<String, String> processPaths = new TreeMap<>();
     /** Executable name to the app's real (marketing) name, e.g. code.exe -> Visual Studio Code. */
     private final Map<String, String> displayNames = new TreeMap<>();
+    /** Executable name to the launch arguments its Start-Menu shortcut carries,
+     *  e.g. update.exe -> "--processStart Discord.exe" (Squirrel-style launchers). */
+    private final Map<String, String> processArgs = new TreeMap<>();
 
     private AppConfig() { load(); }
 
@@ -96,6 +99,10 @@ public class AppConfig {
                 String exe = normalizeProcess(key.substring(8));
                 String display = props.getProperty(key, "").trim();
                 if (!exe.isEmpty() && !display.isEmpty()) displayNames.put(exe, display);
+            } else if (key.startsWith("appargs.")) {
+                String exe = normalizeProcess(key.substring(8));
+                String args = props.getProperty(key, "").trim();
+                if (!exe.isEmpty() && !args.isEmpty()) processArgs.put(exe, args);
             }
         }
         // One-time merge of a new default set into an existing configuration; after
@@ -133,6 +140,9 @@ public class AppConfig {
         props.setProperty("allowed.process.paths", paths.toString());
         for (Map.Entry<String, String> e : displayNames.entrySet()) {
             props.setProperty("appname." + e.getKey(), e.getValue());
+        }
+        for (Map.Entry<String, String> e : processArgs.entrySet()) {
+            props.setProperty("appargs." + e.getKey(), e.getValue());
         }
         try {
             File parent = configFile.getParentFile();
@@ -174,6 +184,20 @@ public class AppConfig {
         return displayNames.get(normalizeProcess(exeName));
     }
 
+    /** Store the launch arguments the app's own shortcut carries (e.g. Squirrel launchers). */
+    public synchronized void setProcessArgs(String exeName, String args) {
+        String key = normalizeProcess(exeName);
+        if (key.isEmpty() || args == null || args.isBlank()) return;
+        processArgs.put(key, args.trim());
+        save();
+    }
+
+    /** The launch arguments stored for an app from its shortcut, or null. */
+    public synchronized String getProcessArgs(String exeName) {
+        if (exeName == null) return null;
+        return processArgs.get(normalizeProcess(exeName));
+    }
+
     public synchronized Set<String> getAllowedProcesses() { return new TreeSet<>(allowedProcesses); }
     public synchronized Set<String> getAllowedSites() { return new TreeSet<>(allowedSites); }
 
@@ -187,6 +211,7 @@ public class AppConfig {
             allowedProcesses.remove(key);
             processPaths.remove(key);
             displayNames.remove(key);
+            processArgs.remove(key);
             save();
         }
     }
