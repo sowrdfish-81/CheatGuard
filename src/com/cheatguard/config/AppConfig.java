@@ -231,6 +231,138 @@ public class AppConfig {
     /** Invigilator-added apps only - the session monitor launches from this list. */
     public synchronized Set<String> getAppEntries() { return new TreeSet<>(appEntries); }
 
+    // --------------------------------------------------------- exam profiles
+
+    private static String profileKey(String name) {
+        String v = name == null ? "" : name.trim().replaceAll("[^A-Za-z0-9 _-]", "");
+        return v.isEmpty() ? "" : v;
+    }
+
+    private static File profileFile(String key) {
+        File dir = new File(AppPaths.getConfigDirectory(), "profiles");
+        if (!dir.exists()) dir.mkdirs();
+        return new File(dir, key + ".properties");
+    }
+
+    /**
+     * Save the current exam setup - allowed sites plus the invigilator-added apps
+     * (paths, display names, launch arguments) - under a name, so the next exam
+     * with the same tools needs one click instead of re-adding everything.
+     * Toolchain entries are machine-wide and are not part of a profile.
+     */
+    public synchronized boolean saveProfile(String name) {
+        String key = profileKey(name);
+        if (key.isEmpty()) return false;
+        java.util.Properties p = new java.util.Properties();
+        p.setProperty("allowed.sites", String.join(",", allowedSites));
+        p.setProperty("allowed.apps", String.join(",", appEntries));
+        StringBuilder paths = new StringBuilder();
+        for (String exe : appEntries) {
+            String path = processPaths.get(exe);
+            if (path != null) {
+                if (paths.length() > 0) paths.append("||");
+                paths.append(exe).append('|').append(path);
+            }
+        }
+        p.setProperty("allowed.process.paths", paths.toString());
+        for (String exe : appEntries) {
+            String d = displayNames.get(exe);
+            if (d != null) p.setProperty("appname." + exe, d);
+            String a = processArgs.get(exe);
+            if (a != null) p.setProperty("appargs." + exe, a);
+        }
+        try {
+            java.io.File f = profileFile(key);
+            if (!f.getParentFile().exists()) f.getParentFile().mkdirs();
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+                p.store(fos, "Cheat.Guard exam profile: " + name);
+            }
+            return true;
+        } catch (Exception e) {
+            AppLog.warn("Could not save profile: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** Saved profile names, sorted. */
+    public synchronized java.util.List<String> listProfiles() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.io.File dir = new File(AppPaths.getConfigDirectory(), "profiles");
+        File[] files = dir.listFiles((d, n) -> n.toLowerCase(java.util.Locale.ROOT).endsWith(".properties"));
+        if (files != null) {
+            for (File f : files) out.add(f.getName().replaceFirst("\\.properties$", ""));
+        }
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    /**
+     * Load a profile: replaces the allowed sites and the invigilator-added apps
+     * with the profile's; machine-wide toolchain entries stay untouched.
+     */
+    public synchronized void loadProfile(String name) {
+        String key = profileKey(name);
+        if (key.isEmpty()) return;
+        File f = profileFile(key);
+        if (!f.isFile()) return;
+        java.util.Properties p = new java.util.Properties();
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(f)) {
+            p.load(fis);
+        } catch (IOException e) {
+            AppLog.warn("Could not read profile: " + e.getMessage());
+            return;
+        }
+
+        allowedSites.clear();
+        for (String s2 : p.getProperty("allowed.sites", "").split(",")) {
+            String n = normalizeSite(s2);
+            if (!n.isEmpty()) allowedSites.add(n);
+        }
+
+        // Remove only the invigilator-added apps; toolchain entries survive.
+        for (String exe : new java.util.HashSet<>(appEntries)) {
+            allowedProcesses.remove(exe);
+            processPaths.remove(exe);
+            displayNames.remove(exe);
+            processArgs.remove(exe);
+        }
+        appEntries.clear();
+
+        for (String entry : p.getProperty("allowed.process.paths", "").split("\\|\\|")) {
+            int bar = entry.indexOf('|');
+            if (bar <= 0) continue;
+            String exe = normalizeProcess(entry.substring(0, bar));
+            String path = entry.substring(bar + 1).trim();
+            if (!exe.isEmpty() && !path.isEmpty()) {
+                appEntries.add(exe);
+                allowedProcesses.add(exe);
+                processPaths.put(exe, path);
+            }
+        }
+        for (String k : p.stringPropertyNames()) {
+            if (k.startsWith("appname.")) {
+                String exe = normalizeProcess(k.substring(8));
+                String v = p.getProperty(k, "").trim();
+                if (!exe.isEmpty() && !v.isEmpty()) { displayNames.put(exe, v); appEntries.add(exe); allowedProcesses.add(exe); }
+            } else if (k.startsWith("appargs.")) {
+                String exe = normalizeProcess(k.substring(8));
+                String v = p.getProperty(k, "").trim();
+                if (!exe.isEmpty() && !v.isEmpty()) { processArgs.put(exe, v); appEntries.add(exe); allowedProcesses.add(exe); }
+            }
+        }
+        // Apps named but without a stored path still count as allowed by name.
+        for (String exe : p.getProperty("allowed.apps", "").split(",")) {
+            String n = normalizeProcess(exe);
+            if (!n.isEmpty()) { appEntries.add(n); allowedProcesses.add(n); }
+        }
+        save();
+    }
+
+    public synchronized void deleteProfile(String name) {
+        String key = profileKey(name);
+        if (!key.isEmpty()) profileFile(key).delete();
+    }
+
     /** Generic marker/flag storage (e.g. toolchain scan version). */
     public synchronized String getConfigValue(String key) {
         return configValues.get(key);

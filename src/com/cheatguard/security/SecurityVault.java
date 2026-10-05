@@ -25,7 +25,23 @@ public class SecurityVault {
 
     public void sealVault(File plaintextLogFile, char[] adminPassword) throws Exception {
         lockManager.releaseLock();
+        seal(plaintextLogFile, adminPassword);
+    }
+
+    /**
+     * Seals an unsealed .dat left behind by a force-stopped session (power cut,
+     * crash, task kill). Same protection as a normal seal; the dashboard offers
+     * this so interrupted sessions still end up as tamper-evident vaults.
+     */
+    public void sealExisting(File plaintextLogFile, char[] adminPassword) throws Exception {
         requireAdmin(adminPassword);
+        if (plaintextLogFile == null || !plaintextLogFile.getName().toLowerCase().endsWith(".dat")) {
+            throw new IllegalArgumentException("Select an unsealed session log (.dat).");
+        }
+        seal(plaintextLogFile, adminPassword);
+    }
+
+    private void seal(File plaintextLogFile, char[] adminPassword) throws Exception {
         if (!plaintextLogFile.exists()) throw new IllegalStateException("Session log file is missing.");
 
         File vaultFile = new File(plaintextLogFile.getParent(), plaintextLogFile.getName().replace(".dat", ".vault"));

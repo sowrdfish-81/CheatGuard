@@ -543,7 +543,8 @@ public class Main {
     /** Status rows that are always worth showing, even in the startup window. */
     private static final Set<String> ALWAYS_SHOWN = Set.of(
             "SESSION_START", "STRICT_NETWORK_LOCK_ENABLED", "EGRESS_FIREWALL_ENABLED",
-            "EGRESS_FIREWALL_FALLBACK", "FILE_LOCK_ENABLED", "FILE_LOCK_SKIPPED", "SESSION_END");
+            "EGRESS_FIREWALL_FALLBACK", "FILE_LOCK_ENABLED", "FILE_LOCK_SKIPPED", "SESSION_END",
+            "EXTERNAL_DEVICE_CONNECTED", "EXTERNAL_DEVICE_PRESENT_AT_START");
 
     /**
      * The first 30 seconds are the machine settling down (apps closing, locks
@@ -754,9 +755,25 @@ public class Main {
             final boolean done = sealed;
             final long alerts = session == null || session.getLogManager() == null
                     ? 0 : session.getLogManager().getRedFlagCount();
+            // The helper verifies every device family after restoring; surface that
+            // proof next to the summary so the invigilator SEES the recovery.
+            String summary = done && session != null ? sessionSummary(session, alerts) : "";
+            if (done) {
+                try {
+                    File dr = new File(com.cheatguard.config.AppPaths.getNetworkDirectory(),
+                            "device-recovery.txt");
+                    if (dr.exists()) {
+                        String detail = new String(java.nio.file.Files.readAllBytes(dr.toPath()),
+                                java.nio.charset.StandardCharsets.UTF_8).trim();
+                        if (!detail.isBlank()) summary +=summary += "\n\nDevice recovery check:\n" + detail;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            final String summaryText = summary;
             SwingUtilities.invokeLater(() -> {
                 if (done) {
-                    JOptionPane.showMessageDialog(frame, sessionSummary(session, alerts),
+                    JOptionPane.showMessageDialog(frame, summaryText,
                             "Session complete", JOptionPane.INFORMATION_MESSAGE);
                     showCard(CARD_HOME);
                 }
@@ -945,7 +962,8 @@ public class Main {
         char[] password = promptAdminPassword("Open allowlist settings");
         if (password == null) return;
         if (verifyOrExplain(password)) {
-            replaceCard(CARD_SETTINGS, new SettingsPanel(adminAuth, () -> showCard(CARD_HOME)));
+            replaceCard(CARD_SETTINGS, new SettingsPanel(adminAuth,
+                () -> activeSession != null, () -> showCard(CARD_HOME)));
             showCard(CARD_SETTINGS);
         }
     }

@@ -8,6 +8,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.io.File;
 import java.util.List;
 import java.util.Set;
 
@@ -16,11 +17,14 @@ public class SettingsPanel extends JPanel {
 
     private final AppConfig config = AppConfig.getInstance();
     private final AdminAuth adminAuth;
+    private final java.util.function.BooleanSupplier sessionActive;
+    private final JComboBox<String> profileCombo = new JComboBox<>();
     private DefaultListModel<String> processModel;
     private DefaultListModel<String> siteModel;
 
-    public SettingsPanel(AdminAuth adminAuth, Runnable onBack) {
+    public SettingsPanel(AdminAuth adminAuth, java.util.function.BooleanSupplier sessionActive, Runnable onBack) {
         this.adminAuth = adminAuth;
+        this.sessionActive = sessionActive;
         setLayout(new BorderLayout());
         setOpaque(true);
         setBackground(UITheme.BG_DARK);
@@ -41,10 +45,94 @@ public class SettingsPanel extends JPanel {
         subtitle.setAlignmentX(LEFT_ALIGNMENT);
         header.add(UITheme.column(4, title, subtitle), BorderLayout.WEST);
 
+        JButton update = UITheme.ghost("Check for update");
+        update.addActionListener(e -> checkForUpdate(update));
         JButton back = UITheme.ghost("Back");
         back.addActionListener(e -> onBack.run());
-        header.add(back, BorderLayout.EAST);
+        JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        headerButtons.setOpaque(false);
+        headerButtons.add(update);
+        headerButtons.add(back);
+        header.add(headerButtons, BorderLayout.EAST);
         return header;
+    }
+
+    /**
+     * Ask GitHub whether a newer release exists; offer to download and run the
+     * official installer. Never offered while a session is active.
+     */
+    private void checkForUpdate(JButton button) {
+        if (sessionActive.getAsBoolean()) {
+            JOptionPane.showMessageDialog(this,
+                    "Cheat.Guard cannot update while an exam session is running.",
+                    "Session active", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        button.setEnabled(false);
+        new Thread(() -> {
+            java.util.Optional<com.cheatguard.config.UpdateChecker.UpdateInfo> info =
+                    com.cheatguard.config.UpdateChecker.checkLatest();
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                button.setEnabled(true);
+                if (info.isEmpty()) {
+                    JOptionPane.showMessageDialog(this,
+                            "Cheat.Guard v" + com.cheatguard.config.UpdateChecker.CURRENT_VERSION
+                                    + " is up to date (or the update check could not reach GitHub).",
+                            "No update", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                com.cheatguard.config.UpdateChecker.UpdateInfo u = info.get();
+                int go = JOptionPane.showConfirmDialog(this,
+                        "Cheat.Guard v" + u.version() + " is available.\n"
+                                + "Download and run the official installer now?\n\n"
+                                + "The app will close while the update installs.",
+                        "Update available", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                if (go != JOptionPane.YES_OPTION) return;
+                runUpdate(u);
+            });
+        }, "CheatGuard-UpdateCheck").start();
+    }
+
+    private void runUpdate(com.cheatguard.config.UpdateChecker.UpdateInfo u) {
+        setEnabled(false);
+        JDialog progress = new JDialog((Frame) null, "Downloading update", false);
+        JLabel bar = new JLabel("Downloading Cheat.Guard v" + u.version() + "... 0%");
+        bar.setBorder(UITheme.padding(18, 24, 18, 24));
+        progress.add(bar);
+        progress.setSize(440, 110);
+        progress.setLocationRelativeTo(null);
+        progress.setVisible(true);
+        new Thread(() -> {
+            try {
+                File target = new File(System.getProperty("java.io.tmpdir"),
+                        "CheatGuard-Setup-" + u.version() + ".exe");
+                com.cheatguard.config.UpdateChecker.download(u.downloadUrl(), target, pct ->
+                        javax.swing.SwingUtilities.invokeLater(() ->
+                                bar.setText("Downloading Cheat.Guard v" + u.version() + "... " + pct + "%")));
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    JOptionPane.showMessageDialog(this,
+                            "Update downloaded. Cheat.Guard will now close and the installer will run.",
+                            "Installing update", JOptionPane.INFORMATION_MESSAGE);
+                    try {
+                        new ProcessBuilder(target.getAbsolutePath(), "/quiet", "/norestart").start();
+                    } catch (Exception ex) {
+                        setEnabled(true);
+                        return;
+                    }
+                    System.exit(0);
+                });
+            } catch (Exception ex) {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    setEnabled(true);
+                    JOptionPane.showMessageDialog(this,
+                            "The update could not be downloaded: " + ex.getMessage()
+                                    + "\nYou can download it manually from the GitHub releases page.",
+                            "Update failed", JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        }, "CheatGuard-UpdateDownload").start();
     }
 
     private JComponent buildBody() {
@@ -53,7 +141,90 @@ public class SettingsPanel extends JPanel {
         columns.add(buildAppCard());
         columns.add(buildSiteCard());
         columns.add(buildSecurityCard());
-        return columns;
+
+        JPanel body = new JPanel(new BorderLayout(0, 18));
+        body.setOpaque(false);
+        body.add(columns, BorderLayout.CENTER);
+        body.add(buildProfilesCard(), BorderLayout.SOUTH);
+        return body;
+    }
+
+    /** Save the current sites + apps under a name; load or delete saved profiles. */
+    private JComponent buildProfilesCard() {
+        JPanel card = UITheme.card();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+
+        JLabel heading = UITheme.section("Exam profiles");
+        JLabel hint = UITheme.muted("<html><body style='width:760px'>Save the current websites and apps as a named profile "
+                + "and load them before an exam - no re-adding anything. Toolchain entries (compilers, git) are "
+                + "machine-wide and are not part of a profile.</body></html>");
+        hint.setForeground(UITheme.TEXT_DIM);
+
+        JTextField nameField = new JTextField();
+        nameField.setMaximumSize(new Dimension(280, 38));
+        nameField.setToolTipText("e.g. CSE exam");
+        JButton save = UITheme.secondary("Save profile");
+        save.addActionListener(e -> {
+            String name = nameField.getText().trim();
+            if (name.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Type a profile name first.",
+                        "Save profile", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (config.saveProfile(name)) {
+                nameField.setText("");
+                profileCombo.removeAllItems();
+                for (String pName : config.listProfiles()) profileCombo.addItem(pName);
+                profileCombo.setSelectedItem(name);
+                JOptionPane.showMessageDialog(this, "Profile \"" + name + "\" saved with the current sites and apps.",
+                        "Profile saved", JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                JOptionPane.showMessageDialog(this, "The profile name may only contain letters, numbers, "
+                        + "spaces, dot, dash and underscore.", "Not saved", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+        JPanel saveRow = new JPanel(new BorderLayout(8, 0));
+        saveRow.setOpaque(false);
+        saveRow.setMaximumSize(new Dimension(760, 44));
+        saveRow.add(nameField, BorderLayout.CENTER);
+        saveRow.add(save, BorderLayout.EAST);
+
+        profileCombo.setMaximumSize(new Dimension(280, 38));
+        for (String pName : config.listProfiles()) profileCombo.addItem(pName);
+        JButton load = UITheme.secondary("Load profile");
+        load.addActionListener(e -> {
+            String selected = (String) profileCombo.getSelectedItem();
+            if (selected == null) return;
+            config.loadProfile(selected);
+            refresh(processModel, config.getAllowedProcesses());
+            refresh(siteModel, config.getAllowedSites());
+            JOptionPane.showMessageDialog(this,
+                    "Profile \"" + selected + "\" loaded. Sites and invigilator apps were replaced; the toolchain stayed.",
+                    "Profile loaded", JOptionPane.INFORMATION_MESSAGE);
+        });
+        JButton delete = UITheme.ghost("Delete profile");
+        delete.addActionListener(e -> {
+            String selected = (String) profileCombo.getSelectedItem();
+            if (selected == null) return;
+            config.deleteProfile(selected);
+            profileCombo.removeItem(selected);
+        });
+
+        JPanel loadRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        loadRow.setOpaque(false);
+        loadRow.setMaximumSize(new Dimension(760, 44));
+        loadRow.add(profileCombo);
+        loadRow.add(load);
+        loadRow.add(delete);
+
+        card.add(leftAlign(heading));
+        card.add(Box.createVerticalStrut(4));
+        card.add(leftAlign(hint));
+        card.add(Box.createVerticalStrut(12));
+        card.add(leftAlign(saveRow));
+        card.add(Box.createVerticalStrut(10));
+        card.add(leftAlign(loadRow));
+        return card;
     }
 
     private JComponent buildAppCard() {

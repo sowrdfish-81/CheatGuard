@@ -91,13 +91,16 @@ public class DashboardPanel extends JPanel {
         left.add(UITheme.scroll(logList), BorderLayout.CENTER);
 
         JButton refresh = UITheme.ghost("Refresh");
+        JButton seal = UITheme.secondary("Seal selected");
         JButton delete = UITheme.ghost("Delete selected");
-        JPanel leftButtons = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel leftButtons = new JPanel(new GridLayout(1, 3, 8, 0));
         leftButtons.setOpaque(false);
         leftButtons.add(refresh);
+        leftButtons.add(seal);
         leftButtons.add(delete);
         left.add(leftButtons, BorderLayout.SOUTH);
         refresh.addActionListener(e -> refreshLogs());
+        seal.addActionListener(e -> sealSelected());
         delete.addActionListener(e -> deleteSelected());
 
         JPanel right = UITheme.card();
@@ -196,6 +199,45 @@ public class DashboardPanel extends JPanel {
             boolean unsealed = selected.getName().toLowerCase().endsWith(".dat");
             SwingUtilities.invokeLater(() -> renderLogWithHighlights(content, unsealed));
         }, "CheatGuard-LogOpen").start();
+    }
+
+    /**
+     * Seal an UNSEALED .dat left by a force-stopped session: encrypt it into a
+     * tamper-evident vault with the same protection a normal session end applies.
+     * Crash recovery for exam evidence.
+     */
+    private void sealSelected() {
+        File selected = logList.getSelectedValue();
+        if (selected == null) { JOptionPane.showMessageDialog(this, "Select a session first."); return; }
+        if (!selected.getName().toLowerCase().endsWith(".dat")) {
+            JOptionPane.showMessageDialog(this, "That log is already sealed.",
+                    "Already sealed", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (sessionPassword.length == 0) {
+            JOptionPane.showMessageDialog(this, "Open the dashboard with the admin password first.",
+                    "Password required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int ok = JOptionPane.showConfirmDialog(this,
+                "Seal this interrupted session's log?\n" + selected.getName()
+                        + "\n\nThe plain log is replaced by an encrypted, signature-protected vault.",
+                "Seal log", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (ok != JOptionPane.YES_OPTION) return;
+        new Thread(() -> {
+            try {
+                vault.sealExisting(selected, sessionPassword.clone());
+                SwingUtilities.invokeLater(() -> {
+                    outputPane.setText("");
+                    resetStats();
+                    refreshLogs();
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this,
+                        "Could not seal log: " + ex.getMessage(),
+                        "Seal failed", JOptionPane.ERROR_MESSAGE));
+            }
+        }, "CheatGuard-LogSeal").start();
     }
 
     private void deleteSelected() {

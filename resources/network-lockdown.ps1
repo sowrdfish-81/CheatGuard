@@ -630,6 +630,80 @@ function Register-FailSafeTask {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Second-account login block. A pre-existing second local account is the classic
+# lockdown bypass (switch user = no file walls). Every OTHER enabled local
+# account is disabled for the session and re-enabled on restore; the CURRENT
+# user is never touched. The disabled list also lands in disabled-accounts.txt
+# so the fail-safe task can re-enable the accounts even if the state snapshot
+# is lost in a crash.
+function Get-OtherEnabledAccounts {
+    $out = @()
+    foreach ($u in @(Get-LocalUser -ErrorAction SilentlyContinue)) {
+        if ($u.Enabled -and $u.SID -and ($u.SID.Value -ine $cfg.userSid)) { $out += $u.Name }
+    }
+    return @($out)
+}
+
+function Disable-OtherAccounts {
+    $names = @(Get-OtherEnabledAccounts)
+    if ($names.Count -lt 1) { return @() }
+    $list = New-Object System.Collections.Generic.List[string]
+    foreach ($n in $names) {
+        try { Disable-LocalUser -Name $n -ErrorAction Stop; $list.Add($n) } catch {}
+    }
+    if ($list.Count -ge 1) {
+        try { ($list -join "`n") | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'disabled-accounts.txt') -Encoding ASCII } catch {}
+    }
+    return @($list)
+}
+
+function Restore-Accounts([object[]]$Names) {
+    $all = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($n in @($Names)) { if ($n) { [void]$all.Add([string]$n) } }
+    $listFile = Join-Path $PSScriptRoot 'disabled-accounts.txt'
+    if (Test-Path -LiteralPath $listFile) {
+        foreach ($l in @(Get-Content -LiteralPath $listFile -ErrorAction SilentlyContinue)) {
+            $n = $l.Trim(); if ($n) { [void]$all.Add($n) }
+        }
+        Remove-Item -LiteralPath $listFile -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($n in @($all)) {
+        try { Enable-LocalUser -Name $n -ErrorAction Stop } catch {}
+    }
+}
+
+# Post-restore device verification: every device family the lockdown could have
+# touched is probed and the result is reported to the app (shown to the
+# invigilator with the session summary).
+function Test-DeviceRecovery {
+    $lines = @()
+    try {
+        $usb = @(Get-CimInstance Win32_DiskDrive -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceType -eq 'USB' })
+        $usbOk = 0
+        foreach ($d in $usb) {
+            try {
+                $letters = @(Get-Partition -DiskNumber $d.DiskNumber -ErrorAction SilentlyContinue |
+                    Where-Object DriveLetter | ForEach-Object { $_.DriveLetter })
+                $readable = $true
+                foreach ($l in $letters) {
+                    if (-not (Test-Path -LiteralPath ($l + ':'))) { $readable = $false }
+                }
+                if ($letters.Count -eq 0 -or $readable) { $usbOk++ }
+            } catch {}
+        }
+        $lines += ('USB storage drives: ' + $usb.Count + ' (accessible: ' + $usbOk + ')')
+        $printers = @(Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue)
+        $spool = Get-Service -Name Spooler -ErrorAction SilentlyContinue
+        $spoolState = 'not running'
+        if ($spool -and $spool.Status -eq 'Running') { $spoolState = 'running' }
+        $lines += ('Printers: ' + $printers.Count + ' | Print spooler: ' + $spoolState)
+        $up = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
+        $lines += ('Network adapters up: ' + $up.Count)
+    } catch {}
+    return @($lines)
+}
+
 function Restore-All {
     Remove-OurRules
 
@@ -656,6 +730,9 @@ function Restore-All {
         Restore-Dns $state.Dns
         Restore-Doh $state.Doh
         Restore-Fus $state.Fus
+        $accountNames = @()
+        foreach ($a in @($state.Accounts)) { $accountNames += [string]$a.Name }
+        Restore-Accounts $accountNames
         Clear-FileDeniesForSid $cfg.userSid @($state.FileLocks)
     } else {
         # State snapshot lost: fall back to a direct, safe recovery. Direct browsing
@@ -673,6 +750,7 @@ function Restore-All {
         Restore-Doh $null
         Restore-Fus @{ Exists = $false }
     }
+    Restore-Accounts @()
 
     # Always, on every path through this function: clear any static 127.0.0.1/::1
     # resolver from EVERY adapter and unlock every drive/profile folder for the
@@ -821,11 +899,16 @@ try {
         Dns = Get-DnsState
         Doh = Get-DohState
         Fus = Get-FusState
+        Accounts = @()
         FileLocks = @()
     }
     $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
 
     Set-FusHidden
+
+    # Block the second-account bypass: every OTHER enabled local account is
+    # disabled now and re-enabled by Restore-All (state list + marker file).
+    $disabledAccounts = @(Disable-OtherAccounts)
 
     # A user-configured proxy is a complete bypass: the browser hands the request to
     # the proxy, which resolves names and connects on its own, never touching the
@@ -840,6 +923,7 @@ try {
         Remove-ItemProperty -LiteralPath $proxyKey -Name 'AutoConfigURL' -ErrorAction SilentlyContinue
         Notify-InternetSettings
     } catch {}
+    $state.Accounts = $disabledAccounts
     $state.Proxy.ProxyEnable = [ordered]@{ Exists=$false; Kind=''; Value=$null }
     $state.Proxy.ProxyServer = [ordered]@{ Exists=$false; Kind=''; Value=$null }
     $state.Proxy.AutoConfigURL = [ordered]@{ Exists=$false; Kind=''; Value=$null }
@@ -1025,6 +1109,10 @@ try {
 
     if (Restore-All) {
         Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
+        try {
+            (Test-DeviceRecovery) -join [Environment]::NewLine |
+                Set-Content -LiteralPath (Join-Path $PSScriptRoot 'device-recovery.txt') -Encoding UTF8
+        } catch {}
         'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
         exit 0
     }
