@@ -182,24 +182,64 @@ function Set-ExamDns {
 function Restore-Dns($DnsState) {
     foreach ($e in @($DnsState)) {
         foreach ($family in @('v4','v6')) {
-            try {
-                $raw = if ($family -eq 'v4') { [string]$e.StaticNameServer } else { [string]$e.StaticNameServerV6 }
-                if ($raw -and $raw.Trim() -ne '') {
-                    $servers = @($raw.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and $_ -ne '127.0.0.1' -and $_ -ne '::1' })
-                    if ($servers.Count -gt 0) {
-                        Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ServerAddresses $servers -ErrorAction Stop
-                        continue
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                try {
+                    $raw = if ($family -eq 'v4') { [string]$e.StaticNameServer } else { [string]$e.StaticNameServerV6 }
+                    if ($raw -and $raw.Trim() -ne '') {
+                        $servers = @($raw.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and $_ -ne '127.0.0.1' -and $_ -ne '::1' })
+                        if ($servers.Count -gt 0) {
+                            Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ServerAddresses $servers -ErrorAction Stop
+                            break
+                        }
                     }
-                }
-                # No static value recorded for this family: put the adapter back on DHCP.
-                # Both families must be reset - a v6-only reset would leave the adapter's
-                # IPv6 resolver on the dead ::1 exam address, and Windows prefers IPv6
-                # resolvers, stalling every lookup even though IPv4 is already correct.
-                Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ResetServerAddresses -ErrorAction Stop
-            } catch {}
+                    # No static value recorded for this family: put the adapter back on DHCP.
+                    # Both families must be reset - a v6-only reset would leave the adapter's
+                    # IPv6 resolver on the dead ::1 exam address, and Windows prefers IPv6
+                    # resolvers, stalling every lookup even though IPv4 is already correct.
+                    Set-DnsClientServerAddress -InterfaceIndex $e.InterfaceIndex -ResetServerAddresses -ErrorAction Stop
+                    break
+                } catch { Start-Sleep -Milliseconds 400 }
+            }
         }
     }
     Clear-DnsClientCache -ErrorAction SilentlyContinue
+}
+
+# The registry NameServer values are the authoritative record of STATIC resolvers per
+# adapter (DHCP-provided DNS never appears there). A static 127.0.0.1 or ::1 here means
+# the adapter still points at the exam filter - with the filter gone that is
+# "connected, but no Internet" on every browser while every other device works fine.
+function Get-StaticLoopbackDnsInterfaces {
+    $bad = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) {
+        $guid = $a.InterfaceGuid
+        foreach ($root in @('HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces',
+                            'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces')) {
+            try {
+                $v = [string](Get-ItemProperty -LiteralPath "$root\$guid" -Name NameServer -ErrorAction Stop).NameServer
+                if ($v -match '(^|,)\s*(127\.0\.0\.1|::1)\s*(,|$)') { [void]$bad.Add($guid) }
+            } catch {}
+        }
+    }
+    return @($bad)
+}
+
+# Safety net under Restore-Dns: EVERY adapter present right now - including ones that
+# appeared mid-session and were redirected after the snapshot was taken - loses any
+# static loopback resolver, with retries, and is then verified from the registry.
+function Repair-AllAdapterDns {
+    for ($round = 0; $round -lt 4; $round++) {
+        $bad = @(Get-StaticLoopbackDnsInterfaces)
+        if ($bad.Count -lt 1) { break }
+        foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) {
+            if (-not $bad.Contains($a.InterfaceGuid)) { continue }
+            try { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop } catch {}
+        }
+        Start-Sleep -Milliseconds 600
+    }
+    $left = @(Get-StaticLoopbackDnsInterfaces)
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    return ($left.Count -lt 1)
 }
 
 # Confirms the local Cheat.Guard DNS filter is actually answering before the exam is
@@ -327,11 +367,73 @@ function Set-FileAccessLocks([string]$ListFile, [string]$Sid) {
     return $locked
 }
 
-function Restore-FileAccess([string[]]$Paths, [string]$Sid) {
-    foreach ($p in @($Paths)) {
-        if ([string]::IsNullOrWhiteSpace($p)) { continue }
-        try { icacls "$p" /remove:d "*$Sid" | Out-Null } catch {}
+function Test-DenyPresent([string]$Path, [string]$Sid) {
+    try {
+        $out = icacls "$Path" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        foreach ($line in @($out)) {
+            if ($null -eq $line) { continue }
+            if ($line.Contains($Sid) -and $line -match '\(DENY\)') { return $true }
+        }
+    } catch {}
+    return $false
+}
+
+# Remove the student's deny ACE from one path and confirm it is really gone; a single
+# silent icacls failure must not leave a drive stuck on "Access is denied" after the exam.
+function Remove-DenyForSid([string]$Path, [string]$Sid) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Sid)) { return }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try { icacls "$Path" /remove:d "*$Sid" | Out-Null } catch {}
+        if (-not (Test-DenyPresent $Path $Sid)) { return }
+        Start-Sleep -Milliseconds 300
     }
+}
+
+# The signed-in student's profile folder. The helper runs elevated, so $env:USERPROFILE
+# may belong to the ADMIN who approved the UAC prompt - resolve the student's profile
+# from the ProfileList key using the SID recorded for the session instead.
+function Get-StudentProfilePath {
+    try {
+        $v = (Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($cfg.userSid)" -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
+        if ($v -and (Test-Path -LiteralPath $v)) { return $v }
+    } catch {}
+    return $env:USERPROFILE
+}
+
+# Paths that may carry an explicit deny for the student SID even when the saved state
+# is missing or was cut short: every drive root (second drives, USB sticks - the lab
+# "everything except C: is denied" case, including portable devices shown as
+# access-denied in Settings) plus the profile content folders and their direct
+# children. Removing a deny can only UNLOCK, never lock, so sweeping these blindly is safe.
+function Get-BlindDenyPaths {
+    $paths = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    foreach ($d in @([System.IO.DriveInfo]::GetDrives())) {
+        try { if ($d.IsReady) { [void]$paths.Add($d.RootDirectory.FullName) } } catch {}
+    }
+    $profile = Get-StudentProfilePath
+    foreach ($name in @('Documents','Downloads','Music','Pictures','Videos','Saved Games',
+                        'Contacts','Links','OneDrive','3D Objects','Searches','Desktop')) {
+        $p = Join-Path $profile $name
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        [void]$paths.Add($p)
+        foreach ($kid in @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)) {
+            [void]$paths.Add($kid.FullName)
+        }
+    }
+    return @($paths)
+}
+
+# Full deny cleanup: every path the session recorded, then the blind sweep. Both are
+# verified per path; the sweep runs even when the state file was lost, so a crashed
+# helper can never leave drives or devices locked after the exam ends.
+function Clear-FileDeniesForSid([string]$Sid, [string[]]$RecordedPaths) {
+    if ([string]::IsNullOrWhiteSpace($Sid)) { return }
+    $all = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    foreach ($p in @($RecordedPaths)) { if (-not [string]::IsNullOrWhiteSpace($p)) { [void]$all.Add($p.Trim()) } }
+    foreach ($p in @(Get-BlindDenyPaths)) { [void]$all.Add($p) }
+    foreach ($p in @($all)) { Remove-DenyForSid $p $Sid }
 }
 
 # VPN concentrators and remote-desktop relays speak on fixed ports that no exam
@@ -470,33 +572,75 @@ function Restore-Fus($Fus) {
     } catch {}
 }
 
+# Puts the whole computer back the way it was found. Nothing here may depend on the
+# saved state being readable: a helper killed by a power cut, a task kill or a corrupt
+# state file must still end with working Internet and unlocked drives. Returns $true
+# only when no static loopback DNS is left behind - the one leftover that presents as
+# "Wi-Fi connected, no Internet" on the PC while every other device works.
 function Restore-All {
     Remove-OurRules
-    if (-not (Test-Path -LiteralPath $stateFile)) { return }
-    $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
 
-    foreach ($p in @($state.Profiles)) {
+    $state = $null
+    if (Test-Path -LiteralPath $stateFile) {
+        try { $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json } catch { $state = $null }
+    }
+
+    if ($null -ne $state) {
+        foreach ($p in @($state.Profiles)) {
+            try {
+                Set-NetFirewallProfile -Profile $p.Name -Enabled $p.Enabled -DefaultOutboundAction $p.DefaultOutboundAction -ErrorAction Stop
+            } catch {}
+        }
+
+        if (Test-Path -LiteralPath $proxyKey) {
+            Set-RegFromState $proxyKey 'ProxyEnable' $state.Proxy.ProxyEnable
+            Set-RegFromState $proxyKey 'ProxyServer' $state.Proxy.ProxyServer
+            Set-RegFromState $proxyKey 'ProxyOverride' $state.Proxy.ProxyOverride
+            Set-RegFromState $proxyKey 'AutoConfigURL' $state.Proxy.AutoConfigURL
+            Notify-InternetSettings
+        }
+
+        Restore-Dns $state.Dns
+        Restore-Doh $state.Doh
+        Restore-Fus $state.Fus
+        Clear-FileDeniesForSid $cfg.userSid @($state.FileLocks)
+    } else {
+        # State snapshot lost: fall back to a direct, safe recovery. Direct browsing
+        # (no proxy) is the only setting that can always reach the network. Only the
+        # outbound default is touched - this app never changes whether profiles are enabled.
+        foreach ($p in @(Get-NetFirewallProfile -ErrorAction SilentlyContinue)) {
+            try { Set-NetFirewallProfile -Profile $p.Name -DefaultOutboundAction Allow -ErrorAction Stop } catch {}
+        }
         try {
-            Set-NetFirewallProfile -Profile $p.Name -Enabled $p.Enabled -DefaultOutboundAction $p.DefaultOutboundAction -ErrorAction Stop
+            Set-ItemProperty -LiteralPath $proxyKey -Name 'ProxyEnable' -Value 0 -ErrorAction Stop
+            Remove-ItemProperty -LiteralPath $proxyKey -Name 'ProxyServer' -ErrorAction SilentlyContinue
+            Remove-ItemProperty -LiteralPath $proxyKey -Name 'AutoConfigURL' -ErrorAction SilentlyContinue
+            Notify-InternetSettings
         } catch {}
+        Restore-Doh $null
+        Restore-Fus @{ Exists = $false }
     }
 
-    if (Test-Path -LiteralPath $proxyKey) {
-        Set-RegFromState $proxyKey 'ProxyEnable' $state.Proxy.ProxyEnable
-        Set-RegFromState $proxyKey 'ProxyServer' $state.Proxy.ProxyServer
-        Set-RegFromState $proxyKey 'ProxyOverride' $state.Proxy.ProxyOverride
-        Set-RegFromState $proxyKey 'AutoConfigURL' $state.Proxy.AutoConfigURL
-        Notify-InternetSettings
-    }
+    # Always, on every path through this function: clear any static 127.0.0.1/::1
+    # resolver from EVERY adapter and unlock every drive/profile folder for the
+    # student SID, whether or not the state file recorded it.
+    $dnsOk = Repair-AllAdapterDns
+    Clear-FileDeniesForSid $cfg.userSid @()
 
-    Restore-Dns $state.Dns
-    Restore-Doh $state.Doh
-    Restore-Fus $state.Fus
-    Restore-FileAccess $state.FileLocks $cfg.userSid
     Remove-Item -LiteralPath $egressStatusFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $lockStatusFile -Force -ErrorAction SilentlyContinue
 
-    Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+    if ($dnsOk) {
+        Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+    } else {
+        # Keep the state file so a later recovery attempt can still find it, and say why.
+        try {
+            ('DNS restore could not be verified - some adapter still has a static 127.0.0.1/::1 resolver. ' +
+             'Run the Emergency-Restore-Network file or reset the adapter DNS.') |
+                Add-Content -LiteralPath $errorFile -Encoding UTF8
+        } catch {}
+    }
+    return $dnsOk
 }
 
 try {
@@ -504,9 +648,11 @@ try {
     Ensure-FirewallServices
 
     if ($RecoverOnly) {
-        Restore-All
-        'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
-        exit 0
+        if (Restore-All) {
+            'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
+            exit 0
+        }
+        exit 1
     }
 
     Remove-Item -LiteralPath $readyFile,$stopFile,$restoredFile,$errorFile -Force -ErrorAction SilentlyContinue
@@ -709,9 +855,13 @@ try {
     # The app seals the log just before asking for shutdown, so serve one last request.
     Handle-ProtectRequest
 
-    Restore-All
-    'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
-    exit 0
+    if (Restore-All) {
+        'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
+        exit 0
+    }
+    # DNS restore could not be verified; Restore-All left the state file and an
+    # explanation in error.txt so the app can recover the session cleanly.
+    exit 1
 } catch {
     $msg = @(
         'Cheat.Guard strict-network helper failed.',

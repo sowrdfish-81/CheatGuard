@@ -207,18 +207,45 @@ public final class StrictNetworkLockdown implements Closeable {
         if (!isWindows()) return true;
         try {
             Files.writeString(stop.toPath(), "STOP", StandardCharsets.US_ASCII);
-            long end = System.currentTimeMillis() + 25000L;
-            while (System.currentTimeMillis() < end) {
-                if (restored.exists() || !state.exists()) break;
-                Thread.sleep(200L);
+            if (waitForRestore(30000L)) {
+                active = false;
+                closeServers();
+                return true;
             }
-            active = false;
-            closeServers();
-            return restored.exists() || !state.exists();
+            // The helper did not confirm a restore (it was killed by a power cut, a
+            // crash or a task kill, or it hit an error). Do not leave the machine with
+            // a dead resolver and locked drives: relaunch it in recover-only mode, which
+            // restores everything the session changed and needs one UAC approval.
+            try {
+                copyHelper();
+                restored.delete();
+                error.delete();
+                launchElevatedStatic(helper, config, true);
+                boolean ok = waitForRestore(75000L);
+                active = false;
+                closeServers();
+                return ok;
+            } catch (Exception recovery) {
+                active = false;
+                closeServers();
+                return restored.exists() || !state.exists();
+            }
         } catch (Exception e) {
             closeServers();
             return false;
         }
+    }
+
+    /** Poll until the helper confirms restoration, the state file is gone, or it errors. */
+    private boolean waitForRestore(long timeoutMs) throws InterruptedException {
+        long end = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < end) {
+            if (restored.exists() || !state.exists()) return true;
+            // error.txt is terminal - the helper only writes it right before exiting.
+            if (error.exists()) return false;
+            Thread.sleep(200L);
+        }
+        return restored.exists() || !state.exists();
     }
 
     public static boolean recoverStaleIfPresent() {

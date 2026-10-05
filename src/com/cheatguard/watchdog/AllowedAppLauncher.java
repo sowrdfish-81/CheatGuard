@@ -4,6 +4,7 @@ import com.cheatguard.config.AppConfig;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -22,6 +23,29 @@ public final class AllowedAppLauncher {
             "code.exe", "code - insiders.exe", "codium.exe", "cursor.exe",
             "idea64.exe", "pycharm64.exe", "clion64.exe", "webstorm64.exe",
             "studio64.exe", "eclipse.exe", "subl.exe", "atom.exe", "devenv.exe");
+
+    /**
+     * Editors that attach to an already-running instance unless told otherwise -
+     * without --new-window a VS Code-style launch would open a tab inside whatever
+     * window was up before the exam instead of a fresh one on the exam folder.
+     */
+    private static final List<String> NEW_WINDOW_FLAG = Arrays.asList(
+            "code.exe", "code - insiders.exe", "codium.exe", "cursor.exe");
+
+    /**
+     * Arguments that open the app FRESH on the exam folder: VS Code-class editors get
+     * a new window on the folder, Eclipse takes its workspace via -data, everything
+     * else that understands a folder takes it as the first argument.
+     */
+    private static List<String> folderOpenArguments(String exeName, File examFolder) {
+        if (NEW_WINDOW_FLAG.contains(exeName)) {
+            return Arrays.asList("--new-window", examFolder.getAbsolutePath());
+        }
+        if (exeName.equals("eclipse.exe")) {
+            return Arrays.asList("-data", examFolder.getAbsolutePath());
+        }
+        return Arrays.asList(examFolder.getAbsolutePath());
+    }
 
     private AllowedAppLauncher() {
     }
@@ -60,9 +84,10 @@ public final class AllowedAppLauncher {
                     return null;
                 }
             }
-            ProcessBuilder pb = FOLDER_AWARE.contains(name)
-                    ? new ProcessBuilder(executable.getAbsolutePath(), examFolder.getAbsolutePath())
-                    : new ProcessBuilder(executable.getAbsolutePath());
+            List<String> command = new ArrayList<>();
+            command.add(executable.getAbsolutePath());
+            if (FOLDER_AWARE.contains(name)) command.addAll(folderOpenArguments(name, examFolder));
+            ProcessBuilder pb = new ProcessBuilder(command);
             // Even when the app ignores the argument, starting it here makes the exam
             // folder the default location in its open/save dialogs.
             pb.directory(examFolder);
@@ -82,12 +107,14 @@ public final class AllowedAppLauncher {
     private static File createStudentShortcut(File exe, File examFolder, String name) {
         try {
             File lnk = new File(examFolder, "Launch " + ProcessWhitelist.friendlyName(name) + ".lnk");
+            String args = "";
+            if (FOLDER_AWARE.contains(name)) {
+                args = String.join(" ", folderOpenArguments(name, examFolder));
+            }
             String ps = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"
                     + lnk.getAbsolutePath().replace("'", "''") + "');"
                     + "$s.TargetPath='" + exe.getAbsolutePath().replace("'", "''") + "';"
-                    + (FOLDER_AWARE.contains(name)
-                        ? "$s.Arguments='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
-                        : "")
+                    + (args.isEmpty() ? "" : "$s.Arguments='" + args.replace("'", "''") + "';")
                     + "$s.WorkingDirectory='" + examFolder.getAbsolutePath().replace("'", "''") + "';"
                     + "$s.Save()";
             Process p = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",

@@ -256,6 +256,11 @@ public class WatchdogEngine implements Runnable {
                                 ProcessWhitelist.friendlyName(name), Violation.Severity.CRITICAL));
                 continue;
             }
+            // Helper processes spawned BY an approved app - NetBeans' bundled java.exe,
+            // IntelliJ's fsnotifier, VS Code's language servers - belong to that app and
+            // must survive even when the IDE is installed outside the system directories.
+            if (!forced && !RUNTIME_NAMES.contains(name) && !COMPILED_OUTPUT_NAMES.contains(name)
+                    && hasAllowedAncestor(ph)) continue;
             if (!forced && (OWN_TOOL_NAMES.contains(name) || BACKGROUND_TOOL_NAMES.contains(name))) continue;
 
             String lowerCmd = command.toLowerCase(Locale.ROOT);
@@ -272,6 +277,28 @@ public class WatchdogEngine implements Runnable {
                     ? new Violation("UNAUTHORIZED_BACKGROUND_APP_CLOSED", app, Violation.Severity.INFO)
                     : new Violation("UNAUTHORIZED_BACKGROUND_APP_CLOSE_FAILED", app, Violation.Severity.CRITICAL));
         }
+    }
+
+    /**
+     * True when the process descends from an invigilator-approved application (within
+     * a few parent hops). Explorer and Windows components deliberately do NOT count -
+     * everything the student starts descends from Explorer - only a name the allowlist
+     * itself holds, or a browser (whose children are judged by website), exempts a helper.
+     */
+    private boolean hasAllowedAncestor(ProcessHandle ph) {
+        ProcessHandle current = ph;
+        for (int hop = 0; hop < 3; hop++) {
+            current = current.parent().orElse(null);
+            if (current == null) break;
+            String cmd = current.info().command().orElse("");
+            if (cmd.isBlank()) continue;
+            String parentName = new File(cmd).getName().toLowerCase(Locale.ROOT);
+            if (whitelist.isBrowser(parentName)) return true;
+            if (com.cheatguard.config.AppConfig.getInstance().getAllowedProcesses().contains(parentName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Executable locations only an administrator can plant files in. */
