@@ -766,10 +766,10 @@ function Restore-All {
 
     if ($dnsOk) {
         Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
-        # Nothing is left to recover - drop the safety-net task instead of leaving a
-        # 10-year background job behind between sessions; the next session start
-        # re-registers it before the helper reports READY.
-        try { Unregister-ScheduledTask -TaskName 'CheatGuard SessionFailSafe' -Confirm:$false -ErrorAction Stop } catch {}
+        # The fail-safe task stays REGISTERED forever: the user's guarantee is that
+        # every boot/logon recovers any leftover lockdown whether Cheat.Guard is
+        # open or not. When nothing needs restoring the task exits in under a
+        # second, so the permanent background job costs effectively nothing.
     } else {
         # Keep the state file so a later recovery attempt can still find it, and say why.
         try {

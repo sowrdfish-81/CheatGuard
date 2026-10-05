@@ -1,6 +1,7 @@
 package com.cheatguard.watchdog;
 
 import com.cheatguard.config.AppPaths;
+import com.cheatguard.core.AppLog;
 import com.cheatguard.core.LogManager;
 import com.cheatguard.core.Violation;
 import com.cheatguard.security.LogProtection;
@@ -282,6 +283,46 @@ public final class StrictNetworkLockdown implements Closeable {
         Violation v = new Violation(type, detail, Violation.Severity.INFO);
         logManager.record(v);
         if (listener != null) listener.onViolation(v);
+    }
+
+    /**
+     * Registers the permanent OS fail-safe (SYSTEM task, every 3 minutes + at
+     * logon) while the app STARTS, so the net exists before the first session is
+     * ever armed. The task idles in under a second whenever there is no lockdown
+     * state to recover, and it is refreshed on every session start.
+     */
+    public static void ensureFailSafeRegistered() {
+        Thread t = new Thread(() -> {
+            try {
+                File dir = AppPaths.getNetworkDirectory();
+                File helper = new File(dir, "network-lockdown.ps1");
+                try (InputStream in = StrictNetworkLockdown.class.getResourceAsStream("/network-lockdown.ps1")) {
+                    if (in == null) return;
+                    Files.copy(in, helper.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                // Forward slashes keep this script free of Java/PowerShell quote traps.
+                String script = "$d = $env:ProgramData + '/CheatGuard/network'; "
+                        + "$ps = $env:SystemRoot + '/System32/WindowsPowerShell/v1.0/powershell.exe'; "
+                        + "$s = $d + '/network-lockdown.ps1'; "
+                        + "if (-not (Test-Path $s)) { exit 1 }; "
+                        + "$action = New-ScheduledTaskAction -Execute $ps -Argument ('-NoProfile -ExecutionPolicy Bypass -File ' + $s + ' -FailSafeCheck'); "
+                        + "$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) "
+                        + "-RepetitionInterval (New-TimeSpan -Minutes 3) -RepetitionDuration (New-TimeSpan -Days 3650); "
+                        + "$logon = New-ScheduledTaskTrigger -AtLogOn; "
+                        + "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+                        + "-StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15); "
+                        + "Register-ScheduledTask -TaskName 'CheatGuard SessionFailSafe' -Action $action "
+                        + "-Trigger @($trigger, $logon) -Settings $settings -User 'SYSTEM' -RunLevel Highest "
+                        + "-Force -ErrorAction Stop | Out-Null";
+                Process p = PowerShellUtil.start(script);
+                if (!p.waitFor(60, TimeUnit.SECONDS)) p.destroyForcibly();
+                AppLog.info("Fail-safe task ensured at app start");
+            } catch (Exception e) {
+                AppLog.warn("Fail-safe task registration at start failed: " + e.getMessage());
+            }
+        }, "CheatGuard-FailSafeReg");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void copyHelper() throws IOException {

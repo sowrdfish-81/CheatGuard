@@ -104,6 +104,9 @@ public class Main {
         // One-time per scan-version: find every compiler/tool installed on THIS
         // machine (gcc, git, flex, java, python...) and allow it with its path.
         com.cheatguard.config.ToolchainScanner.scanIfNeededAsync();
+        // The OS-level recovery net exists from the moment the app starts - even
+        // if no session is ever armed, a leftover lockdown can always self-heal.
+        StrictNetworkLockdown.ensureFailSafeRegistered();
         if (!StrictNetworkLockdown.recoverStaleIfPresent()) {
             JOptionPane.showMessageDialog(null,
                     "A previous exam session could not be restored automatically.\n"
