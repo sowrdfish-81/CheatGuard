@@ -1,0 +1,55 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261006002150
+Username: ROHAN\mdroh
+RunAs User: ROHAN\mdroh
+Configuration Name: 
+Machine: ROHAN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\fix-task-and-clean.ps1
+Process ID: 16132
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+[1] re-register fail-safe task with classic schtasks.exe
+SUCCESS: The scheduled task "CheatGuard SessionFailSafe" has successfully been created.
+
+Folder: \
+TaskName                                 Next Run Time          Status         
+======================================== ====================== ===============
+CheatGuard SessionFailSafe               06-Oct-26 12:31:00 AM  Ready
+[2] manual -FailSafeCheck to clean the current simulated leftovers
+
+    exit=0
+[3] verify
+  rules (expect 0): 1
+  state file (expect False): True
+  dns untouched [8.8.8.8,1.1.1.1]
+  STRESSTEST readable (expect ACL lines, no DENY):
+    C:\Users\mdroh\Documents\STRESSTEST ROHAN\mdroh:(OI)(CI)(DENY)(RX,D)
+                                        ROHAN\mdroh:(OI)(CI)(DENY)(RX,D)
+                                        S-1-5-21-3386253252-3976114247-2349148618-1002:(I)(OI)(CI)(RX)
+                                        NT AUTHORITY\SYSTEM:(I)(OI)(CI)(F)
+  failsafe log: no log (state was already gone or check skipped)
+[4] force-run the task once to prove the task path works
+SUCCESS: Attempted to run the scheduled task "CheatGuard SessionFailSafe".
+
+Status:                               Ready
+Last Run Time:                        06-Oct-26 12:21:53 AM
+Last Result:                          0
+[5] task still present after run?
+
+Folder: \
+TaskName                                 Next Run Time          Status         
+======================================== ====================== ===============
+CheatGuard SessionFailSafe               06-Oct-26 12:31:00 AM  Ready
+DONE
+**********************
+Windows PowerShell transcript end
+End time: 20261006002158
+**********************

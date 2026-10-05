@@ -49,7 +49,7 @@ import java.util.concurrent.TimeUnit;
 public class Main {
 
     /** Visible in the window title, so "which build am I running" is never a guess. */
-    private static final String BUILD_STAMP = "2026-09-25 16:45";
+    private static final String BUILD_STAMP = "2026-10-05 23:55";
 
     private static final InstanceGuard INSTANCE_GUARD = new InstanceGuard();
     private static final String CARD_FIRST_RUN = "FIRST_RUN";

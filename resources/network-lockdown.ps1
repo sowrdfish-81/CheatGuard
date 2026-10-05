@@ -1,10 +1,15 @@
 param(
-    [Parameter(Mandatory=$true)][string]$Config,
-    [switch]$RecoverOnly
+    [string]$Config,
+    [switch]$RecoverOnly,
+    [switch]$FailSafeCheck
 )
 
 $ErrorActionPreference = 'Stop'
-$cfg = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
+
+# Fail-safe runs never receive a -Config file; every other entry point does.
+if (-not $FailSafeCheck) {
+    $cfg = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
+}
 $stateFile = $cfg.stateFile
 $readyFile = $cfg.readyFile
 $stopFile = $cfg.stopFile
@@ -577,6 +582,34 @@ function Restore-Fus($Fus) {
 # state file must still end with working Internet and unlocked drives. Returns $true
 # only when no static loopback DNS is left behind - the one leftover that presents as
 # "Wi-Fi connected, no Internet" on the PC while every other device works.
+# Registers the permanent OS-level fail-safe: a SYSTEM scheduled task that runs
+# this script's -FailSafeCheck every 10 minutes. If a session is ever abandoned
+# (helper killed, power loss, crash), the next tick detects it and restores the
+# machine with no app, no helper and no UAC prompt involved. Registered with /F
+# on every session start so an earlier copy is always refreshed.
+function Register-FailSafeTask {
+    try {
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $script = Join-Path $PSScriptRoot 'network-lockdown.ps1'
+        $action = New-ScheduledTaskAction -Execute $ps `
+            -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $script + '" -FailSafeCheck')
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+        # Windows skips scheduled tasks on battery by default. A student laptop mid-exam
+        # is exactly the machine this net exists for, so it must start on battery and
+        # catch up on missed ticks - without this the task silently never fires there.
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+        Register-ScheduledTask -TaskName 'CheatGuard SessionFailSafe' -Action $action `
+            -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force -ErrorAction Stop | Out-Null
+    } catch {
+        try {
+            ('[' + (Get-Date -Format s) + '] FailSafe task registration FAILED: ' + $_.Exception.Message) |
+                Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8
+        } catch {}
+    }
+}
+
 function Restore-All {
     Remove-OurRules
 
@@ -632,6 +665,10 @@ function Restore-All {
 
     if ($dnsOk) {
         Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+        # Nothing is left to recover - drop the safety-net task instead of leaving a
+        # 10-year background job behind between sessions; the next session start
+        # re-registers it before the helper reports READY.
+        try { Unregister-ScheduledTask -TaskName 'CheatGuard SessionFailSafe' -Confirm:$false -ErrorAction Stop } catch {}
     } else {
         # Keep the state file so a later recovery attempt can still find it, and say why.
         try {
@@ -641,6 +678,70 @@ function Restore-All {
         } catch {}
     }
     return $dnsOk
+}
+
+# ---------------------------------------------------------------------------
+# Fail-safe mode: run by the "CheatGuard SessionFailSafe" scheduled task every
+# few minutes, as SYSTEM, with no user interaction. When a session was left
+# behind (the helper was killed, the PC lost power, anything crashed) this
+# detects it and puts the whole machine back - deny ACLs, DNS, firewall,
+# proxy, DoH - so a student can NEVER be stuck with locked drives or dead
+# Internet after an interrupted exam. A live session is never touched.
+# Placed AFTER the restore functions on purpose: PowerShell executes top-down
+# and the fail-safe body calls Restore-All, which must already be defined.
+# ---------------------------------------------------------------------------
+if ($FailSafeCheck) {
+    $ErrorActionPreference = 'Continue'
+    $stateFile  = Join-Path $PSScriptRoot 'firewall_state.json'
+    $errorFile  = Join-Path $PSScriptRoot 'error.txt'
+    $restoredFile = Join-Path $PSScriptRoot 'restored.marker'
+    $egressStatusFile = Join-Path $PSScriptRoot 'egress-status.txt'
+    $lockStatusFile = Join-Path $PSScriptRoot 'lock-status.txt'
+    $allowedIpFile = ''
+    $lockPathsFile = ''
+    $verifyHost = ''
+    $protectRequestFile = ''
+    $protectDoneFile = ''
+    try {
+        if (-not (Test-Path -LiteralPath $stateFile)) { exit 0 }
+
+        # A session is only "interrupted" when NEITHER the app NOR the elevated
+        # session helper is alive. The session helper is the invocation WITH
+        # -Config; other -FailSafeCheck instances must not see each other as a
+        # live helper, or two concurrent checks would mutually skip forever.
+        $appAlive = @(Get-Process -Name 'CheatGuard' -ErrorAction SilentlyContinue).Count -gt 0
+        $helperAlive = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'network-lockdown\.ps1' `
+                           -and $_.CommandLine -match '-Config' `
+                           -and $_.ProcessId -ne $PID }).Count -gt 0
+        if ($appAlive -or $helperAlive) {
+            try { ('[' + (Get-Date -Format s) + '] FailSafe: live session detected (app=' +
+                $appAlive + ', helper=' + $helperAlive + '), skipping.') |
+                Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8 } catch {}
+            exit 0
+        }
+
+        $sid = ''
+        try { $sid = [string](Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json).UserSid } catch {}
+        if ([string]::IsNullOrWhiteSpace($sid)) {
+            try { ('[' + (Get-Date -Format s) + '] FailSafe: state unreadable, skipping.') |
+                Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8 } catch {}
+            exit 0
+        }
+        $cfg = [pscustomobject]@{ userSid = $sid; userSidForLocks = $sid }
+        $proxyKey = "Registry::HKEY_USERS\$sid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+
+        $ok = Restore-All
+        try {
+            ('[' + (Get-Date -Format s) + '] FailSafe: interrupted session detected; restore ' +
+                $(if ($ok) { 'completed and verified.' } else { 'ran but DNS verification FAILED - see error.txt.' })) |
+                Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8
+        } catch {}
+    } catch {
+        try { ('[' + (Get-Date -Format s) + '] FailSafe error: ' + $_.Exception.Message) |
+            Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8 } catch {}
+    }
+    exit 0
 }
 
 try {
@@ -815,6 +916,8 @@ try {
         icacls "$networkRoot" /grant "*S-1-5-18:(OI)(CI)(F)"     | Out-Null   # SYSTEM: full
         icacls "$networkRoot" /grant "*S-1-5-32-545:(OI)(CI)(RX)" | Out-Null  # Users: read+execute only
     } catch {}
+
+    Register-FailSafeTask
 
     'READY' | Set-Content -LiteralPath $readyFile -Encoding ASCII
 

@@ -1,0 +1,41 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261006001011
+Username: ROHAN\mdroh
+RunAs User: ROHAN\mdroh
+Configuration Name: 
+Machine: ROHAN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\recover-via-failsafe.ps1
+Process ID: 21612
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+[1] close test CheatGuard instance (so the fail-safe sees an interrupted session)
+    cheatguard processes now: 0
+[2] redeploy fixed helper
+[3] broken state before fail-safe
+  dns on Wi-Fi: 1.1.1.1,8.8.8.8
+  leftover rules: 0
+  state file exists: False
+[4] run -FailSafeCheck
+
+[5] clean state after fail-safe
+  dns on Wi-Fi (expect DHCP/empty): 1.1.1.1,8.8.8.8
+  leftover rules (expect 0): 0
+  state file deleted: True
+  failsafe log: MISSING
+  deny on OneDrive-Desktop (expect 0 cheatguard-type): 0
+[6] internet check (DNS resolution + TCP 443)
+  resolved www.google.com -> 2001:4860:4829:7700::
+  TCP 443 connect: OK
+RECOVER_DONE
+**********************
+Windows PowerShell transcript end
+End time: 20261006001016
+**********************

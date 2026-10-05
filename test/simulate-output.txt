@@ -1,0 +1,70 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261006001207
+Username: ROHAN\mdroh
+RunAs User: ROHAN\mdroh
+Configuration Name: 
+Machine: ROHAN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1
+Process ID: 10504
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\simulate-broken.ps1:12 char:1
++ Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value 'exam ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+wifi=Wi-Fi originalDns=[1.1.1.1,8.8.8.8]
+broken: deny=2 dns=[127.0.0.1] rules=1 state=True
+SIMULATED - now waiting for the scheduled task to clean it
+**********************
+Windows PowerShell transcript end
+End time: 20261006001210
+**********************

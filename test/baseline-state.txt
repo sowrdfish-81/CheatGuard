@@ -1,0 +1,38 @@
+=== DNS ===
+Wi-Fi ifIndex=21 v4=[8.8.8.8,8.8.4.4] v6=[]
+Ethernet ifIndex=19 v4=[] v6=[fec0:0:0:ffff::1,fec0:0:0:ffff::2,fec0:0:0:ffff::3]
+Local Area Connection ifIndex=17 v4=[] v6=[fec0:0:0:ffff::1,fec0:0:0:ffff::2,fec0:0:0:ffff::3]
+OpenVPN Connect DCO Adapter ifIndex=12 v4=[] v6=[fec0:0:0:ffff::1,fec0:0:0:ffff::2,fec0:0:0:ffff::3]
+Bluetooth Network Connection ifIndex=4 v4=[] v6=[fec0:0:0:ffff::1,fec0:0:0:ffff::2,fec0:0:0:ffff::3]
+Ethernet 2 ifIndex=2 v4=[] v6=[fec0:0:0:ffff::1,fec0:0:0:ffff::2,fec0:0:0:ffff::3]
+=== FW Profiles ===
+Domain Enabled=True Outbound=NotConfigured
+Private Enabled=True Outbound=NotConfigured
+Public Enabled=True Outbound=NotConfigured
+GroupRules=0
+=== Proxy ===
+
+
+CertificateRevocation    : 1
+DisableCachingOfSSLPages : 0
+IE5_UA_Backup_Flag       : 5.0
+PrivacyAdvanced          : 1
+SecureProtocols          : 10240
+User Agent               : Mozilla/4.0 (compatible; MSIE 8.0; Win32)
+EnableNegotiate          : 1
+MigrateProxy             : 1
+ZonesSecurityUpgrade     : {142, 223, 39, 22...}
+WarnonZoneCrossing       : 0
+ProxyEnable              : 0
+PSPath                   : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVers
+                           ion\Internet Settings
+PSParentPath             : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVers
+                           ion
+PSChildName              : Internet Settings
+PSDrive                  : HKCU
+PSProvider               : Microsoft.PowerShell.Core\Registry
+
+
+
+
+Invalid parameter "C:\Users\mdroh\Downloads"
