@@ -131,6 +131,7 @@ public class SettingsPanel extends JPanel {
             java.io.File exe = new java.io.File(target);
             config.addAllowedProcessPath(exe);
             config.setAppDisplayName(exe.getName(), app.displayName());
+            config.addAppEntry(exe.getName());
             // Keep the shortcut's launch arguments (Squirrel-style launchers such as
             // Discord's Update.exe need "--processStart <app>.exe" to open at all).
             config.setProcessArgs(exe.getName(), shortcut[1]);
@@ -148,6 +149,7 @@ public class SettingsPanel extends JPanel {
                 java.io.File exe = chooser.getSelectedFile();
                 config.addAllowedProcessPath(exe);
                 config.setAppDisplayName(exe.getName(), realAppName(exe));
+                config.addAppEntry(exe.getName());
                 refresh(processModel, config.getAllowedProcesses());
             }
         });

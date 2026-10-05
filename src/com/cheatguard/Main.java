@@ -101,6 +101,9 @@ public class Main {
             return;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(INSTANCE_GUARD::close, "InstanceGuard-Release"));
+        // One-time per scan-version: find every compiler/tool installed on THIS
+        // machine (gcc, git, flex, java, python...) and allow it with its path.
+        com.cheatguard.config.ToolchainScanner.scanIfNeededAsync();
         if (!StrictNetworkLockdown.recoverStaleIfPresent()) {
             JOptionPane.showMessageDialog(null,
                     "A previous exam session could not be restored automatically.\n"
@@ -647,9 +650,13 @@ public class Main {
         footer.setBorder(UITheme.padding(14, 18, 14, 18));
 
         // Approved apps: launching from here opens the app on the exam folder, so the
-        // student never needs to browse the disk to reach their workspace. The combo
-        // carries exe names; the renderer shows each app's real name.
-        String[] apps = AppConfig.getInstance().getAllowedProcesses().toArray(new String[0]);
+        // student never needs to browse the disk to reach their workspace. Only the
+        // apps the invigilator added appear here - auto-allowed toolchain entries
+        // (compilers, git, cmd...) may run but are not launchable exam apps.
+        java.util.LinkedHashSet<String> launchable =
+                new java.util.LinkedHashSet<>(AppConfig.getInstance().getAppEntries());
+        launchable.retainAll(AppConfig.getInstance().getAllowedProcesses());
+        String[] apps = launchable.toArray(new String[0]);
         JComboBox<String> appCombo = UITheme.combo(apps);
         appCombo.setRenderer((list, value, index, selected, focus) -> {
             JLabel l = new JLabel(com.cheatguard.watchdog.ProcessWhitelist.friendlyName(value));

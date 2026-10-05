@@ -61,6 +61,12 @@ public class AppConfig {
     /** Executable name to the launch arguments its Start-Menu shortcut carries,
      *  e.g. update.exe -> "--processStart Discord.exe" (Squirrel-style launchers). */
     private final Map<String, String> processArgs = new TreeMap<>();
+    /** Executables the INVIGILATOR added as "apps" (search picker / Choose .exe).
+     *  Only these appear on the session monitor's launch combo - toolchain entries
+     *  (compilers, git, cmd...) are allowed to run but are not launchable apps. */
+    private final Set<String> appEntries = new TreeSet<>();
+    /** Generic markers and flags persisted as-is (scan versions, timestamps). */
+    private final Map<String, String> configValues = new TreeMap<>();
 
     private AppConfig() { load(); }
 
@@ -105,6 +111,20 @@ public class AppConfig {
                 if (!exe.isEmpty() && !args.isEmpty()) processArgs.put(exe, args);
             }
         }
+        // Invigilator-added apps. Old configs predate the list: seed it with every
+        // process that has a stored launch path (only picker-added apps have one).
+        String apps = props.getProperty("allowed.apps");
+        if (apps == null) {
+            appEntries.addAll(processPaths.keySet());
+        } else {
+            for (String a : apps.split(",")) {
+                String n = normalizeProcess(a);
+                if (!n.isEmpty()) appEntries.add(n);
+            }
+        }
+        for (String key : props.stringPropertyNames()) {
+            if (key.startsWith("cfg.")) configValues.put(key.substring(4), props.getProperty(key, ""));
+        }
         // One-time merge of a new default set into an existing configuration; after
         // this the marker is current, so entries an admin removed stay removed.
         // Version 3 also REMOVES the account/login sites from the defaults.
@@ -143,6 +163,10 @@ public class AppConfig {
         }
         for (Map.Entry<String, String> e : processArgs.entrySet()) {
             props.setProperty("appargs." + e.getKey(), e.getValue());
+        }
+        props.setProperty("allowed.apps", String.join(",", appEntries));
+        for (Map.Entry<String, String> e : configValues.entrySet()) {
+            props.setProperty("cfg." + e.getKey(), e.getValue());
         }
         try {
             File parent = configFile.getParentFile();
@@ -198,6 +222,27 @@ public class AppConfig {
         return processArgs.get(normalizeProcess(exeName));
     }
 
+    /** Register an executable as an invigilator-added APP (shown on the monitor combo). */
+    public synchronized void addAppEntry(String exeName) {
+        String key = normalizeProcess(exeName);
+        if (!key.isEmpty() && appEntries.add(key)) save();
+    }
+
+    /** Invigilator-added apps only - the session monitor launches from this list. */
+    public synchronized Set<String> getAppEntries() { return new TreeSet<>(appEntries); }
+
+    /** Generic marker/flag storage (e.g. toolchain scan version). */
+    public synchronized String getConfigValue(String key) {
+        return configValues.get(key);
+    }
+
+    public synchronized void setConfigValue(String key, String value) {
+        if (key == null || key.isBlank()) return;
+        if (value == null || value.isBlank()) configValues.remove(key);
+        else configValues.put(key, value);
+        save();
+    }
+
     public synchronized Set<String> getAllowedProcesses() { return new TreeSet<>(allowedProcesses); }
     public synchronized Set<String> getAllowedSites() { return new TreeSet<>(allowedSites); }
 
@@ -212,6 +257,7 @@ public class AppConfig {
             processPaths.remove(key);
             displayNames.remove(key);
             processArgs.remove(key);
+            appEntries.remove(key);
             save();
         }
     }
