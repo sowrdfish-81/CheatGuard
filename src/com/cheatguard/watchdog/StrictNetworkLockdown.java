@@ -210,7 +210,10 @@ public final class StrictNetworkLockdown implements Closeable {
         active = false;
         try {
             Files.writeString(stop.toPath(), "STOP", StandardCharsets.US_ASCII);
-            if (waitForRestore(30000L)) {
+            // A verified restore sweeps every drive root and profile folder with
+            // icacls and retries DNS - it can legitimately take over a minute on a
+            // slow machine, so wait long enough before considering a fallback.
+            if (waitForRestore(60000L)) {
                 closeServers();
                 return true;
             }

@@ -252,30 +252,35 @@ function Repair-AllAdapterDns {
 # resolution would be dead for approved sites too, so lockdown must be rolled back.
 function Test-DnsFilter {
     param([string]$Server = '127.0.0.1')
-    $client = $null
-    try {
-        $client = New-Object System.Net.Sockets.UdpClient
-        $client.Client.ReceiveTimeout = 4000
-        $client.Connect($Server, 53)
-        $q = New-Object System.Collections.Generic.List[byte]
-        $q.AddRange([byte[]]@(0x12,0x34,0x01,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00))
-        foreach ($label in @('selftest','invalid')) {
-            $bytes = [System.Text.Encoding]::ASCII.GetBytes($label)
-            $q.Add([byte]$bytes.Length)
-            $q.AddRange($bytes)
+    # A single lost UDP reply under load (an updater hammering DNS, a GC pause in
+    # the app) must NOT roll the whole exam back - answer-or-not is retried.
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $client = $null
+        try {
+            $client = New-Object System.Net.Sockets.UdpClient
+            $client.Client.ReceiveTimeout = 4000
+            $client.Connect($Server, 53)
+            $q = New-Object System.Collections.Generic.List[byte]
+            $q.AddRange([byte[]]@(0x12,0x34,0x01,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00))
+            foreach ($label in @('selftest','invalid')) {
+                $bytes = [System.Text.Encoding]::ASCII.GetBytes($label)
+                $q.Add([byte]$bytes.Length)
+                $q.AddRange($bytes)
+            }
+            $q.Add([byte]0)
+            $q.AddRange([byte[]]@(0x00,0x01,0x00,0x01))
+            $payload = $q.ToArray()
+            [void]$client.Send($payload, $payload.Length)
+            $remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+            $reply = $client.Receive([ref]$remote)
+            if ($null -ne $reply -and $reply.Length -ge 12) { return $true }
+        } catch {
+        } finally {
+            if ($null -ne $client) { $client.Close() }
         }
-        $q.Add([byte]0)
-        $q.AddRange([byte[]]@(0x00,0x01,0x00,0x01))
-        $payload = $q.ToArray()
-        [void]$client.Send($payload, $payload.Length)
-        $remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
-        $reply = $client.Receive([ref]$remote)
-        return ($null -ne $reply -and $reply.Length -ge 12)
-    } catch {
-        return $false
-    } finally {
-        if ($null -ne $client) { $client.Close() }
+        Start-Sleep -Milliseconds 700
     }
+    return $false
 }
 
 # Hardens a sealed session log so the desktop account cannot delete or edit it.
@@ -776,6 +781,15 @@ try {
     Assert-Administrator
     Ensure-FirewallServices
 
+    # Supersede any stale copy of this helper left behind by an interrupted start
+    # or an app-side relaunch: two live helpers would race each other's restores.
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'network-lockdown\.ps1' `
+                       -and $_.CommandLine -match '-Config' `
+                       -and $_.ProcessId -ne $PID } |
+        ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
+    Start-Sleep -Milliseconds 400
+
     if ($RecoverOnly) {
         if (Restore-All) {
             'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
@@ -1010,6 +1024,7 @@ try {
     Handle-ProtectRequest
 
     if (Restore-All) {
+        Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
         'RESTORED' | Set-Content -LiteralPath $restoredFile -Encoding ASCII
         exit 0
     }
