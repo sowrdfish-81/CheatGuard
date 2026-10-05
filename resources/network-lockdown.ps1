@@ -577,6 +577,21 @@ function Restore-Fus($Fus) {
     } catch {}
 }
 
+# Deny cleanup without a known student SID (state file lost or corrupt): every
+# local account in ProfileList loses its deny ACE on the standard lock set. Only
+# meaningful with session evidence, which the fail-safe checks before calling.
+function Clear-AllLocalDenies {
+    $sids = New-Object System.Collections.Generic.HashSet[string]
+    try {
+        Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction SilentlyContinue |
+            ForEach-Object { if ($_.PSChildName -like 'S-1-5-21-*') { [void]$sids.Add($_.PSChildName) } }
+    } catch {}
+    if ($sids.Count -lt 1) { return }
+    foreach ($p in @(Get-BlindDenyPaths)) {
+        foreach ($s in $sids) { Remove-DenyForSid $p $s }
+    }
+}
+
 # Puts the whole computer back the way it was found. Nothing here may depend on the
 # saved state being readable: a helper killed by a power cut, a task kill or a corrupt
 # state file must still end with working Internet and unlocked drives. Returns $true
@@ -703,7 +718,16 @@ if ($FailSafeCheck) {
     $protectRequestFile = ''
     $protectDoneFile = ''
     try {
-        if (-not (Test-Path -LiteralPath $stateFile)) { exit 0 }
+        $hasState = Test-Path -LiteralPath $stateFile
+        if (-not $hasState) {
+            # No snapshot - but a deleted or lost state file must NOT disable this
+            # net: leftover rules in our group or a recorded lock list prove a
+            # session ran here and may have left pieces behind. Without evidence
+            # there is nothing of ours to clean, so exit silently.
+            $leftoverRules = @(Get-NetFirewallRule -Group 'Cheat.Guard Strict Exam' -ErrorAction SilentlyContinue).Count
+            $lockList = Join-Path $PSScriptRoot 'lock-paths.txt'
+            if ($leftoverRules -lt 1 -and -not (Test-Path -LiteralPath $lockList)) { exit 0 }
+        }
 
         # A session is only "interrupted" when NEITHER the app NOR the elevated
         # session helper is alive. The session helper is the invocation WITH
@@ -722,16 +746,20 @@ if ($FailSafeCheck) {
         }
 
         $sid = ''
-        try { $sid = [string](Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json).UserSid } catch {}
+        if ($hasState) {
+            try { $sid = [string](Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json).UserSid } catch {}
+        }
         if ([string]::IsNullOrWhiteSpace($sid)) {
-            try { ('[' + (Get-Date -Format s) + '] FailSafe: state unreadable, skipping.') |
+            # State missing or unreadable: Restore-All's direct-recovery branch
+            # still runs; Clear-AllLocalDenies below covers the unknown-SID case.
+            try { ('[' + (Get-Date -Format s) + '] FailSafe: no readable state (evidence present); direct recovery.') |
                 Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8 } catch {}
-            exit 0
         }
         $cfg = [pscustomobject]@{ userSid = $sid; userSidForLocks = $sid }
         $proxyKey = "Registry::HKEY_USERS\$sid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 
         $ok = Restore-All
+        Clear-AllLocalDenies
         try {
             ('[' + (Get-Date -Format s) + '] FailSafe: interrupted session detected; restore ' +
                 $(if ($ok) { 'completed and verified.' } else { 'ran but DNS verification FAILED - see error.txt.' })) |
@@ -862,6 +890,17 @@ try {
     if ((-not [string]::IsNullOrWhiteSpace($lockPathsFile)) -and (Test-Path -LiteralPath $lockPathsFile)) {
         try { $script:fileLocks = @(Set-FileAccessLocks $lockPathsFile $cfg.userSid) } catch { $script:fileLocks = @() }
     }
+    # The hosts file is a direct DNS bypass: mapping any blocked name to a raw IP
+    # makes the local filter irrelevant for that name. Deny writes for the student's
+    # account (deny beats allow, so it also holds for an administrator student) and
+    # record it with the other locks so restore removes it.
+    try {
+        $hostsFile = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+        if ((-not [string]::IsNullOrWhiteSpace($cfg.userSid)) -and (Test-Path -LiteralPath $hostsFile)) {
+            icacls "$hostsFile" /deny "*$($cfg.userSid):(W)" | Out-Null
+            $script:fileLocks = @($script:fileLocks) + @($hostsFile)
+        }
+    } catch {}
     $state.FileLocks = @($script:fileLocks)
     $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $stateFile -Encoding UTF8
     if (-not [string]::IsNullOrWhiteSpace($lockStatusFile)) {
@@ -927,6 +966,18 @@ try {
         if (-not (Get-Process -Id ([int]$cfg.parentPid) -ErrorAction SilentlyContinue)) { break }
         Handle-ProtectRequest
         $loopCount++
+        if (($loopCount % 120) -eq 0) {
+            # Re-register the fail-safe about once a minute: an administrator
+            # student deleting the scheduled task must not disable this net.
+            Register-FailSafeTask
+        }
+        if ($script:egressActive -and (($loopCount % 4) -eq 0)) {
+            # An administrator flipping the outbound default back to Allow is a
+            # two-second bypass; re-assert it continuously while egress is armed.
+            foreach ($p in @(Get-NetFirewallProfile -ErrorAction SilentlyContinue)) {
+                try { if ($p.DefaultOutboundAction -ne 'Block') { Set-NetFirewallProfile -Profile $p.Name -DefaultOutboundAction Block -ErrorAction Stop } } catch {}
+            }
+        }
         if ($script:egressActive -and ($loopCount % 10) -eq 0) {
             # Approved pages resolve new CDN addresses mid-exam; the allow rule follows.
             $ips = @(Read-AllowedIps)

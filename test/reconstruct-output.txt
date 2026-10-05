@@ -1,0 +1,24 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261006005452
+Username: ROHAN\mdroh
+RunAs User: ROHAN\mdroh
+Configuration Name: 
+Machine: ROHAN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\reconstruct-state.ps1
+Process ID: 7620
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+state written: True FileLocks=0 wifi ifIndex=21
+RECONSTRUCT_DONE
+**********************
+Windows PowerShell transcript end
+End time: 20261006005453
+**********************

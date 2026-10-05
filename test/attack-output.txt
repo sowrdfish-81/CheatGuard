@@ -1,0 +1,263 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261006004937
+Username: ROHAN\mdroh
+RunAs User: ROHAN\mdroh
+Configuration Name: 
+Machine: ROHAN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1
+Process ID: 13580
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+=== ATTACK 1: corrupt state file ===
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], UnauthorizedA
+   ccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+broken: deny=0 rules=11 readable=NO(access-denied)
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+after : deny=0 rules=11 readable=NO(access-denied)
+=== ATTACK 2: state file DELETED, evidence left ===
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], UnauthorizedA
+   ccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+broken: deny=0 rules=12 readable=NO(access-denied)
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+after : deny=0 rules=12 readable=NO(access-denied)
+=== ATTACK 3: deny with NO evidence (must stay untouched) ===
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+New-Item : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:18 char:5
++     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\Documents\STRESSTEST:String) [New-Item], UnauthorizedA
+   ccessException
+    + FullyQualifiedErrorId : CreateDirectoryUnauthorizedAccessError,Microsoft.PowerShell.Commands.NewItemCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access is denied
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : ItemExistsUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], 
+UnauthorizedAccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+Set-Content : Access to the path 'C:\Users\mdroh\Documents\STRESSTEST\work.txt' is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:19 char:5
++     Set-Content -LiteralPath (Join-Path $testDir 'work.txt') -Value ' ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Users\mdroh\...SSTEST\work.txt:String) [Set-Content], Unauthorized
+   AccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+before: deny=0 rules=12 readable=NO(access-denied)
+
+icacls : C:\Users\mdroh\Documents\STRESSTEST: Access is denied.
+At C:\Users\mdroh\.zcode\workspace\default\CheatGuard_repo\test\attack-failsafe.ps1:23 char:25
++     return ('deny=' + @(icacls "$testDir" 2>$null | Where-Object { $_ ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\mdroh\...cess is denied.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+PS>TerminatingError(Get-Content): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Access is denied"
+after : deny=0 rules=12 readable=NO(access-denied)  (deny expected to REMAIN: no evidence = not ours)
+=== cleanup test folder ===
+LOG: [2026-10-06T00:24:00] FailSafe error: The term 'Restore-All' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+LOG: [2026-10-06T00:26:53] FailSafe: interrupted session detected; restore completed and verified.
+LOG: [2026-10-06T00:49:39] FailSafe: live session detected (app=True, helper=True), skipping.
+LOG: [2026-10-06T00:49:41] FailSafe: live session detected (app=True, helper=True), skipping.
+LOG: [2026-10-06T00:49:43] FailSafe: live session detected (app=True, helper=True), skipping.
+ATTACKS_DONE
+**********************
+Windows PowerShell transcript end
+End time: 20261006004943
+**********************
