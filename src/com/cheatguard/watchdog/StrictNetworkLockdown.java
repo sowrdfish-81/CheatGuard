@@ -302,6 +302,7 @@ public final class StrictNetworkLockdown implements Closeable {
         String verifyHost = firstAllowedSite();
         String json = "{\n" +
                 "\"parentPid\":" + currentPid() + ",\n" +
+                "\"parentName\":" + jsonEscape(parentName()) + "\",\n" +
                 "\"dnsPort\":" + DnsAllowlistServer.DNS_PORT + ",\n" +
                 "\"dnsIpv6\":" + dnsIpv6 + ",\n" +
                 "\"userSid\":\"" + jsonEscape(sid) + "\",\n" +
@@ -603,6 +604,17 @@ public final class StrictNetworkLockdown implements Closeable {
         if (!packaged.isBlank() && new File(packaged).isFile()) return packaged;
         try { return ProcessHandle.current().info().command().orElse(""); }
         catch (Exception e) { return ""; }
+    }
+
+    /** This process's executable name; the helper verifies it against parentPid so
+     *  a reused PID can never keep a dead session's lockdown alive. */
+    private String parentName() {
+        try {
+            String cmd = ProcessHandle.current().info().command().orElse("");
+            if (!cmd.isBlank()) return new File(cmd).getName();
+        } catch (Exception ignored) {
+        }
+        return "CheatGuard";
     }
 
     private long currentPid() {

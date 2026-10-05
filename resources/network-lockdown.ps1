@@ -614,14 +614,17 @@ function Register-FailSafeTask {
         $action = New-ScheduledTaskAction -Execute $ps `
             -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $script + '" -FailSafeCheck')
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-            -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+            -RepetitionInterval (New-TimeSpan -Minutes 3) -RepetitionDuration (New-TimeSpan -Days 3650)
+        # Recovery also starts the moment anyone logs on (a crashed session's PC
+        # reboots straight into a clean machine instead of waiting for a tick).
+        $logon = New-ScheduledTaskTrigger -AtLogOn
         # Windows skips scheduled tasks on battery by default. A student laptop mid-exam
         # is exactly the machine this net exists for, so it must start on battery and
         # catch up on missed ticks - without this the task silently never fires there.
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
             -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
         Register-ScheduledTask -TaskName 'CheatGuard SessionFailSafe' -Action $action `
-            -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force -ErrorAction Stop | Out-Null
+            -Trigger @($trigger, $logon) -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force -ErrorAction Stop | Out-Null
     } catch {
         try {
             ('[' + (Get-Date -Format s) + '] FailSafe task registration FAILED: ' + $_.Exception.Message) |
@@ -844,8 +847,11 @@ if ($FailSafeCheck) {
         $ok = Restore-All
         Clear-AllLocalDenies
         try {
+            $devices = ''
+            try { $devices = ' Devices: ' + ((Test-DeviceRecovery) -join '; ') } catch {}
             ('[' + (Get-Date -Format s) + '] FailSafe: interrupted session detected; restore ' +
-                $(if ($ok) { 'completed and verified.' } else { 'ran but DNS verification FAILED - see error.txt.' })) |
+                $(if ($ok) { 'completed and verified.' } else { 'ran but DNS verification FAILED - see error.txt.' }) +
+                $devices) |
                 Add-Content -LiteralPath (Join-Path $PSScriptRoot 'failsafe-log.txt') -Encoding UTF8
         } catch {}
     } catch {
@@ -858,6 +864,11 @@ if ($FailSafeCheck) {
 try {
     Assert-Administrator
     Ensure-FirewallServices
+
+    # Register the fail-safe FIRST, before anything is locked: if this helper dies
+    # mid-arm (locks applied, process gone), the very next task tick still
+    # recovers the machine. The registration is idempotent (/F).
+    Register-FailSafeTask
 
     # Supersede any stale copy of this helper left behind by an interrupted start
     # or an app-side relaunch: two live helpers would race each other's restores.
@@ -1061,7 +1072,12 @@ try {
     $loopCount = 0
     while ($true) {
         if (Test-Path -LiteralPath $stopFile) { break }
-        if (-not (Get-Process -Id ([int]$cfg.parentPid) -ErrorAction SilentlyContinue)) { break }
+        # Windows reuses PIDs: a dead app's ID can belong to an unrelated process
+        # minutes later. The parent must be alive AND be the Cheat.Guard process
+        # name, otherwise the lockdown would linger for hours after a crash.
+        $parent = Get-Process -Id ([int]$cfg.parentPid) -ErrorAction SilentlyContinue
+        if (-not $parent) { break }
+        if ($cfg.parentName -and ($parent.ProcessName -ine $cfg.parentName)) { break }
         Handle-ProtectRequest
         $loopCount++
         if (($loopCount % 120) -eq 0) {
