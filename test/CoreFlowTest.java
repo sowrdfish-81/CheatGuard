@@ -262,6 +262,18 @@ public class CoreFlowTest {
         } finally {
             server.close();
         }
+
+        // Self-cleaning: remove the site this block added and restore the pristine
+        // single-instance state, so re-running the test against the same data
+        // directory does not fail the earlier fresh-install checks.
+        try {
+            java.io.File wlFile = com.cheatguard.config.AppPaths.getWhitelistFile();
+            if (wlFile.exists()) wlFile.delete();
+            java.lang.reflect.Field f2 = AppConfig.class.getDeclaredField("instance");
+            f2.setAccessible(true);
+            f2.set(null, null);
+        } catch (Exception ignored) {
+        }
     }
 
     private static byte[] query(DnsAllowlistServer server, String host) throws Exception {

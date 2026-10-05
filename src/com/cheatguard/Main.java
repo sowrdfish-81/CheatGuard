@@ -189,7 +189,10 @@ public class Main {
                     .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(),
                     java.nio.charset.StandardCharsets.UTF_8).trim();
-            p.waitFor();
+            if (!p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return false; // assume unelevated; the relaunch path will ask
+            }
             return out.toLowerCase(java.util.Locale.ROOT).contains("true");
         } catch (Exception e) {
             return false; // assume unelevated; the relaunch path will ask

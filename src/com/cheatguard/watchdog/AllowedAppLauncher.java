@@ -163,7 +163,10 @@ public final class AllowedAppLauncher {
         try {
             Process p = new ProcessBuilder("where", name).redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor();
+            if (!p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return null;
+            }
             for (String line : out.split("\\R")) {
                 File f = new File(line.trim());
                 if (f.isFile()) return f;

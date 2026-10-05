@@ -55,7 +55,7 @@ public class ExternalDeviceMonitor {
             }
             p.waitFor();
         } catch (Exception e) {
-            AppLog.warn("External device scan error: " + e.getMessage());
+            AppLog.warn("External device scan error: " + e);
         }
         return devices;
     }
