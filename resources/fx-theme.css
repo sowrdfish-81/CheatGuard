@@ -1,0 +1,278 @@
+/* ============================================================================
+   Cheat.Guard - JavaFX theme
+   Dark professional palette, Inter typography, soft elevation.
+   ========================================================================= */
+
+.root {
+    -fx-font-family: 'Inter Regular';
+    -fx-font-size: 13px;
+    -fx-text-fill: #F3F6FB;
+    -fx-background-color: #0B0E14;
+}
+
+/* ---------------------------------------------------------------- text ---- */
+
+.label { -fx-text-fill: #F3F6FB; }
+
+.h-display {
+    -fx-font-family: 'Inter Bold';
+    -fx-font-size: 30px;
+    -fx-text-fill: #F3F6FB;
+}
+.h-title {
+    -fx-font-family: 'Inter SemiBold';
+    -fx-font-size: 19px;
+    -fx-text-fill: #F3F6FB;
+}
+.h-section {
+    -fx-font-family: 'Inter SemiBold';
+    -fx-font-size: 14px;
+    -fx-text-fill: #E6EBF4;
+}
+.text-muted { -fx-text-fill: #9AA4B2; }
+.text-dim   { -fx-text-fill: #667082; }
+.text-accent { -fx-text-fill: #2DD4BF; }
+.text-danger { -fx-text-fill: #F87171; }
+.text-warn   { -fx-text-fill: #FBBF24; }
+
+/* -------------------------------------------------------------- panels ---- */
+
+.backdrop {
+    -fx-background-color: linear-gradient(to bottom right, #0B0E14 0%, #0D1220 55%, #0A1A1C 100%);
+}
+
+.card {
+    -fx-background-color: #12161F;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+    -fx-border-color: rgba(255, 255, 255, 0.055);
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.45), 18, 0.1, 0, 6);
+}
+
+.card-flat {
+    -fx-background-color: #141927;
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-border-color: rgba(255, 255, 255, 0.05);
+}
+
+.stat-card {
+    -fx-background-color: #171C29;
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-border-color: rgba(255, 255, 255, 0.05);
+    -fx-padding: 10 12 10 12;
+}
+
+/* ------------------------------------------------------------- buttons ---- */
+
+.button {
+    -fx-font-family: 'Inter SemiBold';
+    -fx-font-size: 13px;
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-cursor: hand;
+    -fx-alignment: CENTER;
+    -fx-padding: 9 18 9 18;
+}
+
+.button-primary {
+    -fx-background-color: linear-gradient(to bottom, #35E0C8, #22C5AE);
+    -fx-text-fill: #06231F;
+}
+.button-primary:hover  { -fx-background-color: linear-gradient(to bottom, #45EAD4, #2BD4BC); }
+.button-primary:pressed { -fx-background-color: #1BAF9A; }
+.button-primary:disabled { -fx-background-color: #1E3A38; -fx-text-fill: #5E7B78; }
+
+.button-secondary {
+    -fx-background-color: #1C2331;
+    -fx-text-fill: #E6EBF4;
+    -fx-border-color: rgba(255, 255, 255, 0.09);
+}
+.button-secondary:hover { -fx-background-color: #232C3E; }
+.button-secondary:pressed { -fx-background-color: #182031; }
+
+.button-compact {
+    -fx-padding: 8 12 8 12;
+    -fx-font-size: 12px;
+}
+
+.button-ghost {
+    -fx-background-color: transparent;
+    -fx-text-fill: #9AA4B2;
+}
+.button-ghost:hover { -fx-background-color: rgba(255, 255, 255, 0.05); -fx-text-fill: #E6EBF4; }
+
+.button-danger {
+    -fx-background-color: #2A161B;
+    -fx-text-fill: #FF9CA5;
+    -fx-border-color: rgba(248, 113, 113, 0.35);
+}
+.button-danger:hover { -fx-background-color: #3A1C23; }
+
+/* -------------------------------------------------------------- inputs ---- */
+
+.text-field, .password-field {
+    -fx-font-family: 'Inter Regular';
+    -fx-font-size: 13px;
+    -fx-text-fill: #F3F6FB;
+    -fx-prompt-text-fill: #5C6672;
+    -fx-background-color: #0F131C;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-padding: 8 12 8 12;
+}
+.text-field:focused, .password-field:focused {
+    -fx-border-color: #2DD4BF;
+    -fx-border-width: 1.4;
+}
+
+/* --------------------------------------------------------------- lists ---- */
+
+.list-view {
+    -fx-background-color: #0F131C;
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-border-color: rgba(255, 255, 255, 0.06);
+    -fx-padding: 4;
+}
+.list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #D7DEE9;
+    -fx-padding: 6 10 6 10;
+    -fx-background-radius: 8;
+}
+.list-cell:filled:hover { -fx-background-color: rgba(255, 255, 255, 0.045); }
+.list-cell:filled:selected {
+    -fx-background-color: rgba(45, 212, 191, 0.14);
+    -fx-text-fill: #FFFFFF;
+}
+
+/* --------------------------------------------------------- scroll panes --- */
+
+.scroll-pane, .scroll-pane .viewport {
+    -fx-background-color: transparent;
+}
+.scroll-bar:vertical, .scroll-bar:horizontal {
+    -fx-background-color: transparent;
+}
+.scroll-bar .thumb {
+    -fx-background-color: rgba(255, 255, 255, 0.12);
+    -fx-background-radius: 6;
+}
+.scroll-bar .thumb:hover { -fx-background-color: rgba(255, 255, 255, 0.2); }
+.scroll-bar .increment-button, .scroll-bar .decrement-button {
+    -fx-opacity: 0;
+    -fx-padding: 0;
+}
+
+/* ----------------------------------------------------------------- pills -- */
+
+.pill {
+    -fx-font-family: 'Inter SemiBold';
+    -fx-font-size: 11px;
+    -fx-background-color: #1A2030;
+    -fx-text-fill: #9AA4B2;
+    -fx-background-radius: 999;
+    -fx-padding: 4 12 4 12;
+    -fx-border-radius: 999;
+    -fx-border-color: rgba(255, 255, 255, 0.07);
+}
+.pill-teal  { -fx-background-color: rgba(45, 212, 191, 0.12);  -fx-text-fill: #2DD4BF; -fx-border-color: rgba(45, 212, 191, 0.3); }
+.pill-red   { -fx-background-color: rgba(248, 113, 113, 0.12); -fx-text-fill: #F87171; -fx-border-color: rgba(248, 113, 113, 0.3); }
+.pill-amber { -fx-background-color: rgba(251, 191, 36, 0.12);  -fx-text-fill: #FBBF24; -fx-border-color: rgba(251, 191, 36, 0.3); }
+
+/* ------------------------------------------------------------- combos ----- */
+
+.combo-box {
+    -fx-background-color: #0F131C;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+}
+.combo-box .list-cell {
+    -fx-text-fill: #E6EBF4;
+    -fx-padding: 6 10 6 10;
+}
+.combo-box .arrow, .combo-box .arrow-button {
+    -fx-background-color: #9AA4B2;
+}
+.combo-box-popup .list-view {
+    -fx-background-color: #161B25;
+    -fx-border-color: rgba(255, 255, 255, 0.1);
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+.combo-box-popup .list-cell:hover { -fx-background-color: rgba(45, 212, 191, 0.12); }
+
+/* --------------------------------------------------------------- log ------ */
+
+.log-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 4 8 4 8;
+    -fx-background-radius: 8;
+}
+.log-cell:hover { -fx-background-color: rgba(255, 255, 255, 0.03); }
+.log-time {
+    -fx-font-family: 'JetBrains Mono', 'Consolas', monospace;
+    -fx-font-size: 11px;
+    -fx-text-fill: #667082;
+}
+.log-tag {
+    -fx-font-family: 'Inter Bold';
+    -fx-font-size: 10px;
+    -fx-background-radius: 6;
+    -fx-padding: 2 7 2 7;
+    -fx-alignment: CENTER;
+}
+.log-tag-alert { -fx-background-color: rgba(248, 113, 113, 0.16); -fx-text-fill: #F87171; }
+.log-tag-warn  { -fx-background-color: rgba(251, 191, 36, 0.14);  -fx-text-fill: #FBBF24; }
+.log-tag-ok    { -fx-background-color: rgba(255, 255, 255, 0.06); -fx-text-fill: #9AA4B2; }
+.log-msg  { -fx-text-fill: #C9D2DF; -fx-wrap-text: true; }
+.log-msg-alert  { -fx-text-fill: #FFB4BA; }
+.log-msg-warn   { -fx-text-fill: #FFE3A1; }
+
+/* -------------------------------------------------------------- dialogs --- */
+
+.dialog-pane {
+    -fx-background-color: #12161F;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-padding: 6;
+}
+.dialog-pane .header-panel {
+    -fx-background-color: transparent;
+}
+.dialog-pane .label {
+    -fx-text-fill: #F3F6FB;
+}
+.dialog-pane .content {
+    -fx-text-fill: #C9D2DF;
+}
+
+/* ---------------------------------------------------------------- misc ---- */
+
+.separator .line {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-border-color: transparent;
+}
+
+.tooltip {
+    -fx-background-color: #1C2331;
+    -fx-text-fill: #E6EBF4;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+}
+
+/* ------------------------------------------------------------ split pane -- */
+
+.split-pane {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+.split-pane-divider {
+    -fx-background-color: #12161F;
+    -fx-padding: 0 3 0 3;
+}

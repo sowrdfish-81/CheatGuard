@@ -9,8 +9,12 @@ rem  A single Windows installer that bundles the app AND its
 rem  own Java runtime - nothing else to build or download.
 rem ============================================================
 
+rem JavaFX 21 (SDK for compiling, jmods for bundling into the runtime).
+set "JFX_SDK=%~dp0..\tools\javafx\javafx-sdk-21.0.5\lib"
+set "JFX_JMODS=%~dp0..\tools\javafx\javafx-jmods-21.0.5"
+
 rem Internal MSI version only (upgrade machinery); the shipped file carries no version.
-set "APP_VERSION=1.7"
+set "APP_VERSION=2.0"
 set "APP_NAME=CheatGuard"
 set "SETUP_EXE=dist\CheatGuard-Setup.exe"
 
@@ -65,7 +69,7 @@ set "SRC_LIST=%TEMP%\cheatguard_sources.txt"
 > "%SRC_LIST%" (
   for /r src %%F in (*.java) do @echo %%F
 )
-javac -encoding UTF-8 -d bin "@%SRC_LIST%"
+javac -encoding UTF-8 --module-path "%JFX_SDK%" --add-modules javafx.controls,javafx.graphics -d bin "@%SRC_LIST%"
 if errorlevel 1 (echo ERROR: compilation failed.& exit /b 1)
 endlocal & set "APP_VERSION=%APP_VERSION%" & set "APP_NAME=%APP_NAME%" & set "SETUP_EXE=%SETUP_EXE%"
 echo Compiled OK.
@@ -101,7 +105,8 @@ jpackage ^
   --win-dir-chooser ^
   --win-upgrade-uuid 8f2b6f5a-1c4e-4d9a-9b3f-2a7c5d8e1f30 ^
   --java-options "-Dfile.encoding=UTF-8" ^
-  --add-modules java.base,java.desktop,java.management,java.logging,java.xml,jdk.crypto.ec ^
+  --module-path "%JFX_JMODS%" ^
+  --add-modules java.base,java.desktop,java.management,java.logging,java.xml,jdk.crypto.ec,jdk.unsupported,javafx.base,javafx.graphics,javafx.controls ^
   --jlink-options "--strip-native-commands --no-header-files --no-man-pages --compress zip-6" ^
   --temp build\jpackage ^
   --dest dist

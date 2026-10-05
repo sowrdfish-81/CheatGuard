@@ -24,7 +24,7 @@ import java.util.Set;
 public final class ToolchainScanner {
 
     /** Bump when the probed tool list or install roots change. */
-    public static final String SCAN_VERSION = "1";
+    public static final String SCAN_VERSION = "2";
 
     private static final String MARKER_KEY = "toolchain.scan.version";
 
@@ -71,6 +71,10 @@ public final class ToolchainScanner {
     static synchronized int scanNow() {
         Set<String> paths = new LinkedHashSet<>();
         try {
+            // NO double quotes anywhere in this script: Java's ProcessBuilder
+            // escapes embedded quotes in a way PowerShell's -Command parsing eats,
+            // which unquoted the paths and made the whole probe a parse error
+            // (the "0 tools installed" failure). Env-var paths use + concatenation.
             String nameList = String.join("','", TOOL_NAMES);
             String script =
                     "$names = @('" + nameList + "'); " +
@@ -78,15 +82,16 @@ public final class ToolchainScanner {
                     "  $c = Get-Command $n -ErrorAction SilentlyContinue; " +
                     "  if ($c -and $c.Source) { Write-Output $c.Source } " +
                     "} " +
+                    "$pf = $env:ProgramFiles; " +
+                    "$pf86 = ${env:ProgramFiles(x86)}; " +
                     "$dirs = @(" +
-                    "  \"$env:ProgramFiles\\Java\", \"$env:ProgramFiles\\Eclipse Adoptium\"," +
-                    "  \"${env:ProgramFiles(x86)}\\Java\", 'C:\\MinGW\\bin', 'C:\\MinGW64\\bin'," +
-                    "  'C:\\TDM-GCC-64\\bin', 'C:\\TDM-GCC-32\\bin', 'C:\\Strawberry\\c\\bin'," +
-                    "  'C:\\GnuWin32\\bin', \"$env:ProgramFiles\\LLVM\\bin\"," +
-                    "  \"$env:ProgramFiles\\Git\\bin\", \"$env:ProgramFiles\\Git\\cmd\"," +
-                    "  \"$env:ProgramFiles\\nodejs\", \"$env:ProgramFiles\\CodeBlocks\\MinGW\\bin\"," +
-                    "  \"$env:LOCALAPPDATA\\Programs\\Python\"); " +
+                    "  ($pf + '\\Java'), ($pf + '\\Eclipse Adoptium'), ($pf86 + '\\Java')," +
+                    "  'C:\\MinGW\\bin', 'C:\\MinGW64\\bin', 'C:\\TDM-GCC-64\\bin', 'C:\\TDM-GCC-32\\bin'," +
+                    "  'C:\\Strawberry\\c\\bin', 'C:\\GnuWin32\\bin', ($pf + '\\LLVM\\bin')," +
+                    "  ($pf + '\\Git\\bin'), ($pf + '\\Git\\cmd'), ($pf + '\\nodejs')," +
+                    "  ($pf + '\\CodeBlocks\\MinGW\\bin'), ($env:LOCALAPPDATA + '\\Programs\\Python')); " +
                     "foreach ($d in $dirs) { " +
+                    "  if (-not $d) { continue } " +
                     "  if (-not (Test-Path $d)) { continue } " +
                     "  Get-ChildItem -Path $d -Recurse -Depth 2 -Filter *.exe -ErrorAction SilentlyContinue | " +
                     "  ForEach-Object { $stem = $_.BaseName.ToLower(); " +
@@ -102,7 +107,8 @@ public final class ToolchainScanner {
                     if (v.length() > 4 && v.toLowerCase().endsWith(".exe")) paths.add(v);
                 }
             }
-            p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            p.waitFor(90, java.util.concurrent.TimeUnit.SECONDS);
+            if (p.isAlive()) p.destroyForcibly();
         } catch (Exception e) {
             AppLog.warn("Toolchain probe error: " + e.getMessage());
         }
