@@ -81,7 +81,6 @@ public final class StrictNetworkLockdown implements Closeable {
                     emitInfo("STRICT_NETWORK_LOCK_ENABLED", "Website allowlist active: only admin-approved domains can be reached during this exam.");
                     emitEgressStatus();
                     emitLockStatus();
-                    startHelperWatchdog();
                     return true;
                 }
                 if (error.exists()) throw new IOException(readQuietly(error));
@@ -234,56 +233,6 @@ public final class StrictNetworkLockdown implements Closeable {
         } catch (Exception e) {
             closeServers();
             return false;
-        }
-    }
-
-    /**
-     * Watches the elevated helper for the rest of the session. If it dies mid-exam
-     * (task kill, crash), the lockdown is left half-applied: DNS still points at the
-     * local filter while nothing re-points new adapters or refreshes rules. The
-     * watchdog raises a red alert and relaunches the helper in full mode once, which
-     * recovers the stale state and re-applies the lockdown after one UAC approval.
-     */
-    private void startHelperWatchdog() {
-        Thread t = new Thread(() -> {
-            boolean relaunched = false;
-            while (active) {
-                try { Thread.sleep(30000L); } catch (InterruptedException e) { return; }
-                if (!active || relaunched) return;
-                if (helperProcessAlive()) continue;
-                Violation lost = new Violation("NETWORK_HELPER_LOST",
-                        "The elevated network helper stopped responding mid-session. Restarting it - "
-                                + "approve the Windows permission prompt to keep the exam lockdown active.",
-                        Violation.Severity.CRITICAL);
-                logManager.record(lost);
-                if (listener != null) listener.onViolation(lost);
-                try {
-                    launchElevatedStatic(helper, config, false);
-                    relaunched = true;
-                } catch (Exception e) {
-                    Violation fail = new Violation("NETWORK_HELPER_RELAUNCH_FAILED",
-                            "The network helper could not be restarted: " + e.getMessage(),
-                            Violation.Severity.CRITICAL);
-                    logManager.record(fail);
-                    if (listener != null) listener.onViolation(fail);
-                    return;
-                }
-            }
-        }, "CheatGuard-HelperWatchdog");
-        t.setDaemon(true);
-        t.start();
-    }
-
-    /** True while an elevated session helper (the invocation with -Config) is alive. */
-    private boolean helperProcessAlive() {
-        try {
-            return ProcessHandle.allProcesses().anyMatch(ph -> {
-                String cmd = ph.info().commandLine().orElse("");
-                return cmd.contains("powershell") && cmd.contains("network-lockdown.ps1")
-                        && cmd.contains("-Config");
-            });
-        } catch (Exception e) {
-            return true; // cannot tell: give the running helper the benefit of the doubt
         }
     }
 
