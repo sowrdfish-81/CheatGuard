@@ -15,7 +15,7 @@ import java.util.Optional;
  */
 public final class UpdateChecker {
 
-    public static final String CURRENT_VERSION = "3.0";
+    public static final String CURRENT_VERSION = "3.3";
     private static final String RELEASES_API =
             "https://api.github.com/repos/sowrdfish-81/CheatGuard/releases/latest";
 
@@ -27,6 +27,11 @@ public final class UpdateChecker {
      * when the check cannot run (offline) or when the answer is malformed.
      */
     public static Optional<UpdateInfo> checkLatest() {
+        return checkLatestAgainst(CURRENT_VERSION);
+    }
+
+    /** Same check against an arbitrary version - lets tests verify the API. */
+    static Optional<UpdateInfo> checkLatestAgainst(String currentVersion) {
         try {
             HttpURLConnection c = (HttpURLConnection) new URL(RELEASES_API).openConnection();
             c.setConnectTimeout(8000);
@@ -42,7 +47,7 @@ public final class UpdateChecker {
             String tag = extract(body, "\"tag_name\":", "\"");
             if (tag == null || tag.isBlank()) return Optional.empty();
             String version = tag.replaceFirst("(?i)^v", "").trim();
-            if (compareVersions(version, CURRENT_VERSION) <= 0) return Optional.empty();
+            if (compareVersions(version, currentVersion) <= 0) return Optional.empty();
 
             // Find the installer asset on that release.
             int assets = body.indexOf("\"assets\"");
@@ -87,6 +92,30 @@ public final class UpdateChecker {
                 }
             }
         }
+    }
+
+    /**
+     * Background update watcher: checks GitHub 15 seconds after the app starts and
+     * then every 6 hours. When a newer release exists, the callback fires ONCE
+     * (the UI decides whether to prompt - and never during a live session).
+     */
+    public static void startAutoChecking(java.util.function.Consumer<UpdateInfo> onNew) {
+        java.util.concurrent.ScheduledExecutorService ses =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "CheatGuard-UpdateCheck");
+                    t.setDaemon(true);
+                    return t;
+                });
+        ses.scheduleWithFixedDelay(() -> {
+            try {
+                Optional<UpdateInfo> info = checkLatest();
+                if (info.isPresent()) {
+                    ses.shutdown();
+                    onNew.accept(info.get());
+                }
+            } catch (Exception ignored) {
+            }
+        }, 15, 360, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     /** Numeric compare of dotted versions ("2.2" vs "3.0"); non-numeric parts ignored. */

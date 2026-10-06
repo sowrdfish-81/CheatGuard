@@ -245,6 +245,7 @@ public class Main {
             showCard(CARD_HOME);
         }
         frame.setVisible(true);
+        startAutoUpdateWatcher();
         Thread t = new Thread(() -> {
             com.cheatguard.config.AppPaths.migrateLegacyProfileData();
             maybeCreateDesktopShortcut();
@@ -1012,6 +1013,57 @@ public class Main {
      * MSI places a Start Menu entry; invigilators expect the icon on the Desktop
      * too. Best effort only — a failure here must never block the app.
      */
+    private void startAutoUpdateWatcher() {
+        com.cheatguard.config.UpdateChecker.startAutoChecking(info ->
+                SwingUtilities.invokeLater(() -> {
+                    if (activeSession != null || sessionBusy) return;
+                    int go = JOptionPane.showConfirmDialog(frame,
+                            "Cheat.Guard v" + info.version() + " is available." + "\n"
+                                    + "Download and install now? The app will close while it installs.",
+                            "Update available", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                    if (go != JOptionPane.YES_OPTION) return;
+                    runAutoUpdate(info);
+                }));
+    }
+
+    private void runAutoUpdate(com.cheatguard.config.UpdateChecker.UpdateInfo info) {
+        JDialog progress = new JDialog(frame, "Downloading update", false);
+        JLabel bar = new JLabel("Downloading Cheat.Guard v" + info.version() + "... 0%");
+        bar.setBorder(UITheme.padding(18, 24, 18, 24));
+        progress.add(bar);
+        progress.setSize(440, 110);
+        progress.setLocationRelativeTo(frame);
+        progress.setVisible(true);
+        new Thread(() -> {
+            try {
+                File target = new File(System.getProperty("java.io.tmpdir"),
+                        "CheatGuard-Setup-" + info.version() + ".exe");
+                com.cheatguard.config.UpdateChecker.download(info.downloadUrl(), target, pct ->
+                        SwingUtilities.invokeLater(() -> bar.setText(
+                                "Downloading Cheat.Guard v" + info.version() + "... " + pct + "%")));
+                SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    JOptionPane.showMessageDialog(frame,
+                            "Update downloaded. Cheat.Guard will now close and the installer will run.",
+                            "Installing update", JOptionPane.INFORMATION_MESSAGE);
+                    try {
+                        new ProcessBuilder(target.getAbsolutePath(), "/quiet", "/norestart").start();
+                    } catch (Exception ex) {
+                        return;
+                    }
+                    System.exit(0);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    JOptionPane.showMessageDialog(frame,
+                            "The update could not be downloaded: " + ex.getMessage(),
+                            "Update failed", JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        }, "CheatGuard-UpdateDownload").start();
+    }
+
     private void maybeCreateDesktopShortcut() {
         File marker = new File(AppPaths.getDataDirectory(), "shortcut.created");
         if (marker.exists()) return;
