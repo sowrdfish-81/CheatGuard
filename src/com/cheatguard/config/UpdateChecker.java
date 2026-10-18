@@ -7,6 +7,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.net.URI;
 
 /**
  * Checks GitHub for a newer Cheat.Guard release and, when asked, downloads the
@@ -50,16 +51,9 @@ public final class UpdateChecker {
             if (compareVersions(version, currentVersion) <= 0) return Optional.empty();
 
             // Find the installer asset on that release.
-            int assets = body.indexOf("\"assets\"");
-            String downloadUrl = null;
-            if (assets >= 0) {
-                String rest = body.substring(assets);
-                if (rest.contains("\"name\": \"CheatGuard-Setup.exe\"")
-                        || rest.contains("\"name\":\"CheatGuard-Setup.exe\"")) {
-                    downloadUrl = extract(rest, "\"browser_download_url\":", "\"");
-                }
-            }
+            String downloadUrl = findInstallerDownloadUrl(body);
             if (downloadUrl == null) return Optional.empty();
+            if (!isTrustedDownloadUrl(downloadUrl)) return Optional.empty();
             return Optional.of(new UpdateInfo(version, downloadUrl));
         } catch (Exception e) {
             return Optional.empty();
@@ -72,6 +66,7 @@ public final class UpdateChecker {
      */
     public static void download(String url, File dest, java.util.function.IntConsumer progress)
             throws Exception {
+        if (!isTrustedDownloadUrl(url)) throw new SecurityException("Untrusted update URL");
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(10000);
         c.setReadTimeout(30000);
@@ -129,6 +124,57 @@ public final class UpdateChecker {
             if (va != vb) return Integer.compare(va, vb);
         }
         return 0;
+    }
+
+    /** Select the URL belonging to the exact installer asset object. */
+    static String findInstallerDownloadUrl(String json) {
+        int assets = json.indexOf("\"assets\"");
+        if (assets < 0) return null;
+        int arrayStart = json.indexOf('[', assets);
+        if (arrayStart < 0) return null;
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        int objectStart = -1;
+        for (int i = arrayStart + 1; i < json.length(); i++) {
+            char ch = json.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (ch == '\\') escaped = true;
+                else if (ch == '"') inString = false;
+                continue;
+            }
+            if (ch == '"') { inString = true; continue; }
+            if (ch == '{') {
+                if (depth == 0) objectStart = i;
+                depth++;
+            } else if (ch == '}' && depth > 0) {
+                depth--;
+                if (depth == 0 && objectStart >= 0) {
+                    String object = json.substring(objectStart, i + 1);
+                    String name = extract(object, "\"name\":", "\"");
+                    if ("CheatGuard-Setup.exe".equals(name)) {
+                        return extract(object, "\"browser_download_url\":", "\"");
+                    }
+                    objectStart = -1;
+                }
+            } else if (ch == ']' && depth == 0) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    static boolean isTrustedDownloadUrl(String value) {
+        try {
+            URI uri = URI.create(value);
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && ("github.com".equalsIgnoreCase(host)
+                    || "objects.githubusercontent.com".equalsIgnoreCase(host));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static int part(String[] parts, int i) {

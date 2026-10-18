@@ -44,18 +44,10 @@ public class SiteMonitor {
             return AppConfig.getInstance().isSiteAllowed(address.trim());
         }
 
-        // Fallback for browsers/versions where the address bar is not exposed to UI Automation.
-        String title = info.getWindowTitle();
-        if (title == null || title.trim().isEmpty()) return false;
-        String lower = title.toLowerCase(Locale.ROOT);
-        for (String site : AppConfig.getInstance().getAllowedSites()) {
-            if (lower.contains(site)) return true;
-            int dot = site.indexOf('.');
-            if (dot > 0) {
-                String brand = site.substring(0, dot);
-                if (brand.length() >= 3 && lower.contains(brand)) return true;
-            }
-        }
+        // A window title is not proof of the page's host: any page can put an
+        // approved domain or brand fragment in its title.  Treat an unavailable
+        // address bar as unverified so the DNS denial remains visible instead of
+        // allowing a possible title-spoofed page through.
         return false;
     }
 }
